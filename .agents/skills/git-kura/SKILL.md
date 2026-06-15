@@ -125,18 +125,7 @@ For reviews:
    cd "$(git kura get <key>)"
    ```
 
-3. Acquire the cooperative worktree guard before inspecting the worktree:
-
-   ```sh
-   git kura guard acquire
-   ```
-
-   Review also uses the shared working tree and index, so it takes the guard
-   like implementation does. If `guard acquire` exits with code 8 and prints
-   `guard-active:`, another agent is already using this worktree. Stop and
-   report instead of reviewing around it.
-
-4. Confirm the target:
+3. Confirm the target:
 
    ```sh
    git status --short
@@ -144,13 +133,11 @@ For reviews:
    git log --oneline --decorate -n 10
    ```
 
-5. Review from inside that worktree.
-6. In review mode, do not edit files unless the user explicitly asks for fixes.
-7. Release the guard when the review is finished:
-
-   ```sh
-   git kura guard release
-   ```
+4. Review from inside that worktree. Do not acquire the worktree guard for a
+   read-only review.
+5. In review mode, do not edit files unless the user explicitly asks for fixes.
+   If fixes are requested, acquire the guard and claim the files before making
+   changes, following the implementation workflow's guard and seal rules.
 
 Lead review responses with bugs, regressions, missing tests, and safety risks.
 If no issues are found, say so and name the checks performed.

@@ -96,18 +96,16 @@ task key を source of truth として、すべての worktree 操作を `git ku
 3. worktree を解決して移動
    cd "$(git kura get <key>)"
 
-4. worktree guard を取得する
-   git kura guard acquire
-   # review も working tree / index を共有するため、実装と同様に guard を取る。
-   # exit code 8（"guard-active:"）なら別 agent が使用中。回避せず報告して止める。
-
-5. レビュー開始
+4. レビュー開始
+   - read-only review では worktree guard を取得しない
    - diff / log / test 結果を確認する
    - AI prompt 向けコンテキストが必要なら: git kura get <key> --toon
    - script 向け metadata が必要なら:     git kura get <key> --json
 
-6. レビューを終えたら guard を解放する
-   git kura guard release
+5. review 中に修正を依頼された場合だけ、変更前に guard を取得して対象ファイルを claim する
+   git kura guard acquire
+   git kura seal claim <files...>
+   # guard / seal の失敗時は開発ワークフローと同じルールに従い、回避せず止める。
 ```
 
 ---
