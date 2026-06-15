@@ -53,3 +53,4 @@ temp/
 .cache/
 /git-kura
 *.local.json
+third_party_licenses/

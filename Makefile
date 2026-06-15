@@ -45,5 +45,13 @@ build:
 walkthrough: build
 	PATH="$(CURDIR)/bin:$$PATH" sh scripts/walkthrough.sh
 
+.PHONY: license-check
+license-check:
+	go tool go-licenses check --include_tests ./...
+
+.PHONY: license-save
+license-save:
+	go tool go-licenses save ./cmd/git-kura --save_path third_party_licenses
+
 .PHONY: check
-check: fmt-check vet coverage vuln
+check: fmt-check vet coverage vuln license-check

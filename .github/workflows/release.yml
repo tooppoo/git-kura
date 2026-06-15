@@ -31,6 +31,9 @@ jobs:
       - name: Check
         run: make check
 
+      - name: Save licenses
+        run: make license-save
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
