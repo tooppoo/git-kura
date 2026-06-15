@@ -15,7 +15,7 @@ The seal feature was designed across four ADRs that were written while the comma
 Each of these ADRs still carries a correct, durable decision, but each one also describes parts of an earlier command model that the implemented seal contract no longer follows:
 
 - `seal add` / `seal remove` were renamed to `seal claim` / `seal unclaim`, and the old names were removed outright rather than kept as deprecated aliases (in contrast to the migration policy ADR 3 proposed).
-- The current seal key is now derived solely from the active git-kura managed worktree. `GIT_KURA_SEAL_KEY` no longer participates in current-key resolution at all (it is unrelated to `GIT_KURA_SEAL_LOCK_TIMEOUT`, which is still used by the store lock).
+- The current seal key is now derived solely from the active git-kura managed worktree. `GIT_KURA_SEAL_KEY` no longer participates in current-key resolution at all (it is unrelated to the seal store lock timeout, which is configured via `git config kura.sealLockTimeoutMs`).
 - The validation command described as `seal check` in ADR 3 is implemented as `seal test`.
 - `seal enter`, `seal session ls`, and `seal session clean` belonged to the session-local model and were withdrawn when that model was replaced.
   `seal doctor` was specified but never implemented; it was not part of the session model and is deferred, not withdrawn.

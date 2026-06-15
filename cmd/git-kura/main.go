@@ -563,7 +563,11 @@ func cmdClose(key string) error {
 	// Acquire the seal store lock before any destructive cleanup. A lock that
 	// cannot be acquired fails with seal-lock-timeout (code 5) and leaves the
 	// worktree, branch, paths.json, and metadata untouched.
-	release, err := acquireSealLock(lockFile)
+	timeout, err := resolveSealLockTimeout(repoRoot)
+	if err != nil {
+		return err
+	}
+	release, err := acquireSealLock(lockFile, timeout)
 	if err != nil {
 		return err
 	}

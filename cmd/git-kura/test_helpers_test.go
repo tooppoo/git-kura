@@ -356,18 +356,6 @@ func requireStdoutNotContainsLine(t *testing.T, result cliResult, notWant string
 	}
 }
 
-// filterEnv returns a copy of env with all entries for the given key removed.
-func filterEnv(env []string, key string) []string {
-	prefix := key + "="
-	filtered := make([]string, 0, len(env))
-	for _, e := range env {
-		if !strings.HasPrefix(e, prefix) {
-			filtered = append(filtered, e)
-		}
-	}
-	return filtered
-}
-
 func requireConformsToOutputSchema(t *testing.T, jsonOutput string) {
 	t.Helper()
 

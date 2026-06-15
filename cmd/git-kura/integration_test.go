@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -667,12 +666,10 @@ func TestSealClaimLockTimeout(t *testing.T) {
 	_ = f.Close()
 	defer func() { _ = os.Remove(lockPath) }()
 
-	env := filterEnv(append(os.Environ(), "PATH="+cli.envPath), "GIT_KURA_SEAL_LOCK_TIMEOUT")
-	env = append(env, "GIT_KURA_SEAL_LOCK_TIMEOUT=100ms")
-	cmd := exec.Command("git", "kura", "seal", "claim", "tracked.txt")
-	cmd.Dir = wt
-	cmd.Env = env
-	result := runCommand(cmd)
+	// Resolve the lock timeout from git config; 0 makes a single attempt that
+	// fails immediately while the lock is held, keeping the test fast.
+	git(t, repo, "config", "kura.sealLockTimeoutMs", "0")
+	result := cli.gitKura(wt, "seal", "claim", "tracked.txt")
 
 	requireExitCode(t, result, exitSealLockTimeout)
 	requireStderrContains(t, result, "seal-lock-timeout:")
@@ -1002,7 +999,9 @@ func TestSealDoctorDoesNotCreateOrAcquireLock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("GIT_KURA_SEAL_LOCK_TIMEOUT", "1ms")
+	// A zero lock timeout would make doctor fail fast if it ever regressed into
+	// acquiring the (held) lock; doctor must ignore it and succeed regardless.
+	git(t, repo, "config", "kura.sealLockTimeoutMs", "0")
 	result := cli.gitKura(repo, "seal", "doctor")
 	requireExitCode(t, result, 0)
 	requireEmptyStdout(t, result)
@@ -1223,12 +1222,10 @@ func TestCloseLockTimeoutChangesNothing(t *testing.T) {
 	_ = f.Close()
 	defer func() { _ = os.Remove(lockPath) }()
 
-	env := filterEnv(append(os.Environ(), "PATH="+cli.envPath), "GIT_KURA_SEAL_LOCK_TIMEOUT")
-	env = append(env, "GIT_KURA_SEAL_LOCK_TIMEOUT=100ms")
-	cmd := exec.Command("git", "kura", "close", "key1")
-	cmd.Dir = repo
-	cmd.Env = env
-	result := runCommand(cmd)
+	// 0 makes close fail immediately while the lock is held, keeping the test
+	// fast without depending on the default 5s timeout.
+	git(t, repo, "config", "kura.sealLockTimeoutMs", "0")
+	result := cli.gitKura(repo, "close", "key1")
 
 	requireExitCode(t, result, exitSealLockTimeout)
 	requireStderrContains(t, result, "seal-lock-timeout:")

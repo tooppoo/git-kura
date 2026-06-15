@@ -272,6 +272,28 @@ createdAt: 2026-06-13T00:00:00Z
 
 `guarded` is `true` when a record exists and `false` otherwise. `key` and `worktreePath` are derived from the current worktree, so the guarded state is reported consistently even when an existing record cannot be parsed. `createdAt` is printed only when guarded.
 
+## Configuration
+
+Kura reads its settings from Git config, so they follow Git's standard scope resolution (local / global / system).
+
+### `kura.sealLockTimeoutMs`
+
+Maximum time, in milliseconds, that `seal claim`, `seal unclaim`, and `close` wait to acquire the seal store lock (`paths.lock`) before failing with `seal-lock-timeout` (exit code 5).
+
+```sh
+git config kura.sealLockTimeoutMs 5000
+```
+
+The value is resolved through Git's standard config scopes; it is not restricted to `--local`. When unset, the timeout defaults to `5000` (5 seconds).
+
+After stripping a trailing newline, the value must consist solely of decimal digits and is interpreted as a non-negative integer number of milliseconds. Values such as `+5`, ` 5`, `5 `, `5s`, `abc`, `-1`, the empty string, and decimals are rejected, and the command fails with an error that names the invalid value.
+
+`0` is valid: the lock is acquired in a single attempt with no retry, so if the lock is already held the command fails immediately with `seal-lock-timeout`.
+
+The timeout is capped at one hour (`3600000` ms). Values larger than that — including integers too large to represent — are rejected as errors.
+
+`seal test` and `seal ls` never take the store lock, so they do not depend on this setting.
+
 ## Exit codes
 
 Kura uses stable exit codes so scripts and AI-agent workflows can react correctly.

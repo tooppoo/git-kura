@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -837,7 +838,7 @@ func TestAcquireSealLockBasic(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, "paths.lock")
 
-	release, err := acquireSealLock(lockPath)
+	release, err := acquireSealLock(lockPath, defaultSealLockTimeout)
 	if err != nil {
 		t.Fatalf("acquireSealLock: %v", err)
 	}
@@ -863,11 +864,7 @@ func TestAcquireSealLockTimeout(t *testing.T) {
 	defer func() { _ = os.Remove(lockPath) }()
 
 	// Use a short timeout for the test.
-	orig := sealStoreLockTimeout
-	sealStoreLockTimeout = 150 * time.Millisecond
-	defer func() { sealStoreLockTimeout = orig }()
-
-	_, err = acquireSealLock(lockPath)
+	_, err = acquireSealLock(lockPath, 150*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected lock-timeout error, got nil")
 	}
@@ -880,11 +877,14 @@ func TestAcquireSealLockTimeout(t *testing.T) {
 	}
 }
 
-func TestAcquireSealLockTimeoutFromEnv(t *testing.T) {
+// TestAcquireSealLockZeroTimeoutTriesOnce verifies the timeout=0 boundary:
+// acquisition is attempted exactly once and, when the lock is already held,
+// fails immediately with seal-lock-timeout rather than retrying.
+func TestAcquireSealLockZeroTimeoutTriesOnce(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, "paths.lock")
 
-	// Hold the lock so acquisition must time out.
+	// Hold the lock so the single attempt must fail.
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		t.Fatal(err)
@@ -892,18 +892,123 @@ func TestAcquireSealLockTimeoutFromEnv(t *testing.T) {
 	_ = f.Close()
 	defer func() { _ = os.Remove(lockPath) }()
 
-	t.Setenv("GIT_KURA_SEAL_LOCK_TIMEOUT", "50ms")
 	start := time.Now()
-	_, err = acquireSealLock(lockPath)
+	_, err = acquireSealLock(lockPath, 0)
 	if err == nil {
 		t.Fatal("expected lock-timeout error, got nil")
 	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Fatalf("env timeout not honored: took %s", elapsed)
+	// A single attempt must not sleep for a retry interval.
+	if elapsed := time.Since(start); elapsed >= sealStoreLockInterval {
+		t.Fatalf("zero timeout retried instead of failing immediately: took %s", elapsed)
 	}
-	if !strings.Contains(err.Error(), "50ms") {
-		t.Fatalf("expected timeout from env in message, got: %s", err.Error())
+	var xe *exitError
+	if !errors.As(err, &xe) || xe.code != exitSealLockTimeout {
+		t.Fatalf("expected exitError with code %d, got: %v", exitSealLockTimeout, err)
 	}
+	if !strings.Contains(err.Error(), "seal-lock-timeout:") {
+		t.Fatalf("expected 'seal-lock-timeout:' prefix in error: %s", err.Error())
+	}
+}
+
+// TestAcquireSealLockZeroTimeoutSucceedsWhenFree verifies that a zero timeout
+// still acquires the lock when it is free (the single attempt succeeds).
+func TestAcquireSealLockZeroTimeoutSucceedsWhenFree(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "paths.lock")
+
+	release, err := acquireSealLock(lockPath, 0)
+	if err != nil {
+		t.Fatalf("acquireSealLock with free lock and zero timeout: %v", err)
+	}
+	release()
+}
+
+func TestResolveSealLockTimeout(t *testing.T) {
+	t.Run("unset uses default", func(t *testing.T) {
+		repo := newTestCLI(t).initRepo(t)
+		got, err := resolveSealLockTimeout(repo)
+		if err != nil {
+			t.Fatalf("resolveSealLockTimeout: %v", err)
+		}
+		if got != defaultSealLockTimeout {
+			t.Fatalf("got %s, want default %s", got, defaultSealLockTimeout)
+		}
+	})
+
+	t.Run("valid values", func(t *testing.T) {
+		cases := map[string]time.Duration{
+			"0":    0,
+			"5000": 5000 * time.Millisecond,
+			"1":    1 * time.Millisecond,
+		}
+		for value, want := range cases {
+			repo := newTestCLI(t).initRepo(t)
+			git(t, repo, "config", sealLockTimeoutConfigKey, value)
+			got, err := resolveSealLockTimeout(repo)
+			if err != nil {
+				t.Fatalf("resolveSealLockTimeout(%q): %v", value, err)
+			}
+			if got != want {
+				t.Fatalf("value %q: got %s, want %s", value, got, want)
+			}
+		}
+	})
+
+	t.Run("the cap itself is accepted", func(t *testing.T) {
+		repo := newTestCLI(t).initRepo(t)
+		git(t, repo, "config", sealLockTimeoutConfigKey, strconv.FormatInt(maxSealLockTimeoutMs, 10))
+		got, err := resolveSealLockTimeout(repo)
+		if err != nil {
+			t.Fatalf("resolveSealLockTimeout at cap: %v", err)
+		}
+		if got != maxSealLockTimeout {
+			t.Fatalf("got %s, want %s", got, maxSealLockTimeout)
+		}
+	})
+
+	t.Run("values above the cap are rejected", func(t *testing.T) {
+		for _, value := range []string{
+			strconv.FormatInt(maxSealLockTimeoutMs+1, 10), // just over the cap
+			"9223372036855",              // parses as int64 but overflows when multiplied
+			"99999999999999999999999999", // too large to fit in int64
+		} {
+			repo := newTestCLI(t).initRepo(t)
+			git(t, repo, "config", sealLockTimeoutConfigKey, value)
+			_, err := resolveSealLockTimeout(repo)
+			if err == nil {
+				t.Fatalf("value %q: expected error, got nil", value)
+			}
+			if !strings.Contains(err.Error(), sealLockTimeoutConfigKey) {
+				t.Fatalf("value %q: error should name the config key, got: %v", value, err)
+			}
+		}
+	})
+
+	t.Run("config read failure is propagated", func(t *testing.T) {
+		repo := newTestCLI(t).initRepo(t)
+		// A non-existent working directory makes git fail to run; the error must
+		// surface rather than being swallowed as an unset key.
+		_, err := resolveSealLockTimeout(filepath.Join(repo, "does-not-exist"))
+		if err == nil {
+			t.Fatal("expected error when git config cannot run, got nil")
+		}
+	})
+
+	t.Run("invalid values are rejected", func(t *testing.T) {
+		for _, value := range []string{"+5", " 5", "5 ", "5s", "abc", "-1", "", "1.5", "0x5"} {
+			repo := newTestCLI(t).initRepo(t)
+			// git config preserves the value (including leading/trailing
+			// whitespace and the empty string) exactly when set via the CLI.
+			git(t, repo, "config", sealLockTimeoutConfigKey, value)
+			_, err := resolveSealLockTimeout(repo)
+			if err == nil {
+				t.Fatalf("value %q: expected error, got nil", value)
+			}
+			if !strings.Contains(err.Error(), sealLockTimeoutConfigKey) {
+				t.Fatalf("value %q: error should name the config key, got: %v", value, err)
+			}
+		}
+	})
 }
 
 func TestAcquireSealLockUnwritableDir(t *testing.T) {
@@ -922,7 +1027,7 @@ func TestAcquireSealLockUnwritableDir(t *testing.T) {
 	}
 	defer func() { _ = os.Chmod(dir, 0o755) }()
 
-	_, err := acquireSealLock(filepath.Join(dir, "paths.lock"))
+	_, err := acquireSealLock(filepath.Join(dir, "paths.lock"), defaultSealLockTimeout)
 	if err == nil {
 		t.Fatal("expected error creating lock in unwritable dir, got nil")
 	}
@@ -964,7 +1069,7 @@ func TestSealLockReleaseReportsRemoveFailure(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "seals")
 	lockPath := filepath.Join(dir, "paths.lock")
 
-	release, err := acquireSealLock(lockPath)
+	release, err := acquireSealLock(lockPath, defaultSealLockTimeout)
 	if err != nil {
 		t.Fatalf("acquireSealLock: %v", err)
 	}
