@@ -10,6 +10,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,11 +55,76 @@ func validateSealStoreJSON(data []byte) error {
 	return nil
 }
 
-// sealStoreLockTimeout is the maximum time to wait for the seal store lock.
-// Future: make configurable via GIT_KURA_SEAL_LOCK_TIMEOUT or a config file.
-var sealStoreLockTimeout = 5 * time.Second
+// defaultSealLockTimeout is the seal store lock timeout used when
+// kura.sealLockTimeoutMs is unset. See resolveSealLockTimeout.
+const defaultSealLockTimeout = 5 * time.Second
+
+// maxSealLockTimeout caps the configurable lock timeout. No seal operation
+// should ever block for more than an hour, and the cap also keeps the millisecond
+// value well within time.Duration's range, avoiding overflow when a very large
+// kura.sealLockTimeoutMs is multiplied by time.Millisecond.
+const maxSealLockTimeout = time.Hour
+
+// maxSealLockTimeoutMs is maxSealLockTimeout expressed in milliseconds, the unit
+// of kura.sealLockTimeoutMs.
+const maxSealLockTimeoutMs = int64(maxSealLockTimeout / time.Millisecond)
 
 const sealStoreLockInterval = 100 * time.Millisecond
+
+// sealLockTimeoutConfigKey is the Git config key that overrides the seal store
+// lock timeout. The value is a non-negative integer in milliseconds, resolved
+// through Git's standard config scopes (local / global / system).
+const sealLockTimeoutConfigKey = "kura.sealLockTimeoutMs"
+
+// resolveSealLockTimeout determines the seal store lock timeout from the
+// kura.sealLockTimeoutMs Git config value, falling back to
+// defaultSealLockTimeout when the key is unset.
+//
+// The configured value is interpreted as non-negative integer milliseconds.
+// After stripping a trailing newline, it must consist solely of decimal digits;
+// values such as "+5", " 5", "5 ", "5s", "abc", "-1", "" (empty), or decimals
+// are rejected as errors. "0" is valid and yields a zero timeout (a single lock
+// acquisition attempt with no retry). The timeout is capped at
+// maxSealLockTimeout: values above the cap (including integers too large to fit
+// in int64) are rejected as errors rather than clamped, which also keeps the
+// value within time.Duration's range.
+func resolveSealLockTimeout(repoRoot string) (time.Duration, error) {
+	raw, configured, err := gitutil.ConfigValue(repoRoot, sealLockTimeoutConfigKey)
+	if err != nil {
+		return 0, err
+	}
+	if !configured {
+		return defaultSealLockTimeout, nil
+	}
+	// git config appends a trailing newline; strip it before validating so the
+	// remaining string is exactly the configured value.
+	value := strings.TrimRight(raw, "\n")
+	if !isDecimalDigits(value) {
+		return 0, fmt.Errorf("invalid %s %q: expected a non-negative integer number of milliseconds", sealLockTimeoutConfigKey, value)
+	}
+	ms, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || ms > maxSealLockTimeoutMs {
+		// value is all decimal digits, so the only possible parse failure is
+		// range overflow; either way the number exceeds the cap.
+		return 0, fmt.Errorf("invalid %s %q: must not exceed %d milliseconds (%s)", sealLockTimeoutConfigKey, value, maxSealLockTimeoutMs, maxSealLockTimeout)
+	}
+	return time.Duration(ms) * time.Millisecond, nil
+}
+
+// isDecimalDigits reports whether s is a non-empty string of ASCII decimal
+// digits only. It deliberately rejects signs, whitespace, and decimal points so
+// that values like "+5", " 5", "5 ", and "1.5" are treated as invalid.
+func isDecimalDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
 
 // sealEntry records how a path is sealed. It is a struct rather than a bare
 // key string so future fields (e.g. sealedAt, agent) can be added without a
@@ -199,19 +265,17 @@ func writeSealStore(path string, store sealPathStore) error {
 }
 
 // acquireSealLock creates the lock file using atomic O_CREATE|O_EXCL, retrying
-// until sealStoreLockTimeout (or GIT_KURA_SEAL_LOCK_TIMEOUT if set).
+// until the supplied timeout elapses. The caller is responsible for resolving
+// the timeout (see resolveSealLockTimeout); this function never reads Git config
+// or environment variables, keeping lock acquisition independent of config
+// resolution. A zero timeout makes exactly one acquisition attempt with no
+// retry, failing immediately with seal-lock-timeout if the lock is held.
 // Returns a release function that removes the lock file. If removal fails the
 // lock would block all future seal commands, so the failure is reported on
 // stderr with the lock path so the user can remove it manually.
-func acquireSealLock(lockPath string) (release func(), err error) {
+func acquireSealLock(lockPath string, timeout time.Duration) (release func(), err error) {
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create seal store dir: %w", err)
-	}
-	timeout := sealStoreLockTimeout
-	if v := os.Getenv("GIT_KURA_SEAL_LOCK_TIMEOUT"); v != "" {
-		if d, parseErr := time.ParseDuration(v); parseErr == nil {
-			timeout = d
-		}
 	}
 	deadline := time.Now().Add(timeout)
 	for {
@@ -301,7 +365,11 @@ func cmdSealClaim(rawPaths []string) error {
 		return err
 	}
 
-	release, err := acquireSealLock(lockFile)
+	timeout, err := resolveSealLockTimeout(repoRoot)
+	if err != nil {
+		return err
+	}
+	release, err := acquireSealLock(lockFile, timeout)
 	if err != nil {
 		return err
 	}
@@ -375,7 +443,11 @@ func cmdSealUnclaim(rawPaths []string) error {
 		return err
 	}
 
-	release, err := acquireSealLock(lockFile)
+	timeout, err := resolveSealLockTimeout(repoRoot)
+	if err != nil {
+		return err
+	}
+	release, err := acquireSealLock(lockFile, timeout)
 	if err != nil {
 		return err
 	}

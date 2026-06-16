@@ -585,9 +585,9 @@ func TestCmdSealLsDoesNotBlockOnLock(t *testing.T) {
 		}
 		t.Cleanup(func() { os.Remove(lockFile) }) //nolint:errcheck
 
-		// If ls (incorrectly) tried to take the lock, it would time out and
-		// fail; with the lock held it must still list immediately.
-		t.Setenv("GIT_KURA_SEAL_LOCK_TIMEOUT", "100ms")
+		// If ls (incorrectly) tried to take the lock, a zero timeout would make
+		// it fail immediately; with the lock held it must still list regardless.
+		git(t, repo, "config", "kura.sealLockTimeoutMs", "0")
 		stdout, err := captureStdout(t, func() error {
 			return run([]string{"seal", "ls"})
 		})
@@ -660,7 +660,8 @@ func TestRunCloseLockTimeoutInProcess(t *testing.T) {
 		}
 		t.Cleanup(func() { os.Remove(lockFile) }) //nolint:errcheck
 
-		t.Setenv("GIT_KURA_SEAL_LOCK_TIMEOUT", "100ms")
+		// 0 makes close fail immediately while the lock is held.
+		git(t, repo, "config", "kura.sealLockTimeoutMs", "0")
 		err = run([]string{"close", "51"})
 		if err == nil {
 			t.Fatal("close with held lock error = nil, want seal-lock-timeout")

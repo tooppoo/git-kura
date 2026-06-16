@@ -33,7 +33,7 @@ The store format is described by `cmd/git-kura/schema/seal_store.schema.json`.
 
 `add/remove` acquire `paths.lock` via `O_CREATE|O_EXCL` before reading the store, validate all requested paths against the in-memory map, then write the updated store with a temp-file atomic rename, and release the lock.
 
-If the lock file already exists the operation retries for up to 5 seconds (fixed in v0; future: configurable via `GIT_KURA_SEAL_LOCK_TIMEOUT` or a config file). Timeout exits with code 5 and a `seal-lock-timeout:` stderr prefix. Cross-key conflict exits with code 6 and a `seal-conflict:` prefix.
+If the lock file already exists the operation retries for up to a configurable timeout (default 5 seconds; overridable via `git config kura.sealLockTimeoutMs <milliseconds>`). Timeout exits with code 5 and a `seal-lock-timeout:` stderr prefix. Cross-key conflict exits with code 6 and a `seal-conflict:` prefix.
 
 Multiple paths are fully validated before any store mutation; partial success is not possible.
 

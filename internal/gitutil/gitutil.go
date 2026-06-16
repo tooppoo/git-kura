@@ -95,3 +95,28 @@ func WorktreeDirty(path string) (bool, error) {
 	}
 	return len(strings.TrimSpace(string(out))) > 0, nil
 }
+
+// ConfigValue reads a single Git config value via `git config --get <key>`,
+// following Git's standard scope resolution (local / global / system). It does
+// not restrict the lookup to any single scope.
+//
+// The value is returned exactly as Git emits it (`git config` appends a trailing
+// newline, which the caller is responsible for trimming). When the key is unset,
+// `git config --get` exits with status 1, which is reported as configured=false
+// with a nil error so callers can fall back to a default. Any other failure is
+// returned as err.
+func ConfigValue(repoRoot, key string) (value string, configured bool, err error) {
+	cmd := exec.Command("git", "config", "--get", key)
+	cmd.Dir = repoRoot
+	out, runErr := cmd.Output()
+	if runErr == nil {
+		return string(out), true, nil
+	}
+	// `git config --get` exits 1 specifically when the key is unset; any other
+	// exit status (or a failure to run git at all) is a real error.
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) && exitErr.ExitCode() == 1 {
+		return "", false, nil
+	}
+	return "", false, fmt.Errorf("read git config %q: %w", key, runErr)
+}
