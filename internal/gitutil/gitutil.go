@@ -102,10 +102,10 @@ func WorktreeDirty(path string) (bool, error) {
 //
 // The value is returned exactly as Git emits it (`git config` appends a trailing
 // newline, which the caller is responsible for trimming). When the key is unset,
-// `git config --get` exits with status 1, which is reported as ok=false with a
-// nil error so callers can fall back to a default. Any other failure is returned
-// as err.
-func ConfigValue(repoRoot, key string) (value string, ok bool, err error) {
+// `git config --get` exits with status 1, which is reported as configured=false
+// with a nil error so callers can fall back to a default. Any other failure is
+// returned as err.
+func ConfigValue(repoRoot, key string) (value string, configured bool, err error) {
 	cmd := exec.Command("git", "config", "--get", key)
 	cmd.Dir = repoRoot
 	out, runErr := cmd.Output()

@@ -198,13 +198,13 @@ func TestGitCommonDirSupportsLinkedWorktree(t *testing.T) {
 func TestConfigValue(t *testing.T) {
 	repo := initRepo(t)
 
-	t.Run("unset key returns ok=false without error", func(t *testing.T) {
-		value, ok, err := gitutil.ConfigValue(repo, "kura.doesNotExist")
+	t.Run("unset key returns configured=false without error", func(t *testing.T) {
+		value, configured, err := gitutil.ConfigValue(repo, "kura.doesNotExist")
 		if err != nil {
 			t.Fatalf("ConfigValue error = %v, want nil", err)
 		}
-		if ok {
-			t.Fatalf("ConfigValue ok = true, want false")
+		if configured {
+			t.Fatalf("ConfigValue configured = true, want false")
 		}
 		if value != "" {
 			t.Fatalf("ConfigValue value = %q, want empty", value)
@@ -213,12 +213,12 @@ func TestConfigValue(t *testing.T) {
 
 	t.Run("set key returns the value with a trailing newline", func(t *testing.T) {
 		gitCmd(t, repo, "config", "kura.sealLockTimeoutMs", "5000")
-		value, ok, err := gitutil.ConfigValue(repo, "kura.sealLockTimeoutMs")
+		value, configured, err := gitutil.ConfigValue(repo, "kura.sealLockTimeoutMs")
 		if err != nil {
 			t.Fatalf("ConfigValue error = %v, want nil", err)
 		}
-		if !ok {
-			t.Fatalf("ConfigValue ok = false, want true")
+		if !configured {
+			t.Fatalf("ConfigValue configured = false, want true")
 		}
 		if value != "5000\n" {
 			t.Fatalf("ConfigValue value = %q, want %q", value, "5000\n")
@@ -229,12 +229,12 @@ func TestConfigValue(t *testing.T) {
 		// Pointing git at a non-existent working directory makes the process
 		// fail to start (a non-exit-status-1 failure), which must surface as a
 		// real error rather than being treated as an unset key.
-		_, ok, err := gitutil.ConfigValue(filepath.Join(repo, "does-not-exist"), "kura.sealLockTimeoutMs")
+		_, configured, err := gitutil.ConfigValue(filepath.Join(repo, "does-not-exist"), "kura.sealLockTimeoutMs")
 		if err == nil {
 			t.Fatalf("ConfigValue error = nil, want error when git cannot run")
 		}
-		if ok {
-			t.Fatalf("ConfigValue ok = true, want false on error")
+		if configured {
+			t.Fatalf("ConfigValue configured = true, want false on error")
 		}
 	})
 }

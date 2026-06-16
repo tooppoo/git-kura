@@ -89,11 +89,11 @@ const sealLockTimeoutConfigKey = "kura.sealLockTimeoutMs"
 // in int64) are rejected as errors rather than clamped, which also keeps the
 // value within time.Duration's range.
 func resolveSealLockTimeout(repoRoot string) (time.Duration, error) {
-	raw, ok, err := gitutil.ConfigValue(repoRoot, sealLockTimeoutConfigKey)
+	raw, configured, err := gitutil.ConfigValue(repoRoot, sealLockTimeoutConfigKey)
 	if err != nil {
 		return 0, err
 	}
-	if !ok {
+	if !configured {
 		return defaultSealLockTimeout, nil
 	}
 	// git config appends a trailing newline; strip it before validating so the
