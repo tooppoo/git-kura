@@ -174,23 +174,3 @@ This produces `./bin/git-kura`. Place it somewhere on `PATH`:
 ```sh
 cp ./bin/git-kura ~/.local/bin/git-kura
 ```
-
----
-
-## go install
-
-```sh
-go install github.com/tooppoo/git-kura/cmd/git-kura@latest
-```
-
-This places the binary in `$(go env GOPATH)/bin`. Make sure that directory is on `PATH`.
-
----
-
-## go get -tool
-
-In a module that uses go toolchain management:
-
-```sh
-go get -tool github.com/tooppoo/git-kura/cmd/git-kura@latest
-```
