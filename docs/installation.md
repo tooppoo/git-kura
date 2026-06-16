@@ -54,18 +54,7 @@ Git recognises `git-kura` as the external subcommand `git kura` automatically on
 The installer always verifies the SHA-256 checksum of the downloaded archive against `checksums.txt` from the same release. A mismatch causes the installer to abort before touching `~/.local/bin`.
 
 If `cosign` is on your `PATH`, the installer additionally verifies the `checksums.txt` signature bundle (`checksums.txt.sigstore.json`) published with each release. You can make this check mandatory with `--require-signature`.
-
-## Build from source
-
-Requirements: Go toolchain, Git
-
-```sh
-git clone https://github.com/tooppoo/git-kura.git
-cd git-kura
-make build
-```
-
-This produces `./bin/git-kura`. Place it somewhere on `PATH`:
+ura`. Place it somewhere on `PATH`:
 
 ```sh
 cp ./bin/git-kura ~/.local/bin/git-kura
