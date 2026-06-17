@@ -29,6 +29,12 @@ git kura seal doctor            # validate the project-wide seal store
 git kura guard acquire          # acquire the cooperative guard for the current worktree
 git kura guard release          # release the cooperative guard for the current worktree
 git kura guard status           # print the guard status for the current worktree
+git kura tools status            # show the install state of every component
+git kura tools status pre-commit # show the install state of one component
+git kura tools install <comp...> # install components from the matching release asset
+git kura tools install --all     # install every component
+git kura tools uninstall <comp...> # remove components
+git kura tools uninstall --all   # remove every component
 ```
 
 ## `git kura open <key>`
@@ -272,13 +278,74 @@ createdAt: 2026-06-13T00:00:00Z
 
 `guarded` is `true` when a record exists and `false` otherwise. `key` and `worktreePath` are derived from the current worktree, so the guarded state is reported consistently even when an existing record cannot be parsed. `createdAt` is printed only when guarded.
 
+## Tools commands
+
+`git kura tools` installs, removes, and inspects *tool components*: self-contained helpers — such as a pre-commit hook or an editor skill — that git-kura installs into the repository from a verified release asset and can later remove.
+
+The framework recognizes three component IDs: `pre-commit`, `claude-skill`, and `codex-skill`. Each component's concrete install behavior is delivered in follow-up work; until then the IDs are recognized so they are not usage errors, while `install` reports that installation is not yet implemented and `status` / `uninstall` report `not-installed`.
+
+An unknown component is a usage error (exit code 2). `install` and `uninstall` require at least one component or `--all`, and `--all` may not be combined with explicit component names; both violations are usage errors. `status` does not accept `--all`: run it with no component to show every component.
+
+When several components are given, git-kura processes as many as it can: one component that fails does not stop the rest. The command exits non-zero when at least one component failed. A `skipped` or `not-installed` result is not, on its own, a failure.
+
+Every operation reports the following per component, in human-readable output: the component ID, release version, source asset, destination, action, managed status, and a reason. `--json` and `--toon` output are not part of this command yet.
+
+The action is drawn from a shared set but is limited per command. `install` reports `created`, `updated`, `skipped`, or `failed`. `uninstall` reports `removed`, `not-installed`, `skipped`, or `failed`. `status` reports `installed`, `not-installed`, `skipped`, or `failed`.
+
+### `git kura tools status [component...]`
+
+Show the install state of tool components from local metadata, the filesystem, and git config only.
+
+```sh
+git kura tools status
+git kura tools status pre-commit claude-skill
+```
+
+`status` never accesses the network and does not check whether the expected release asset is available remotely. With no component it reports every registered component; with one or more components it reports only those.
+
+### `git kura tools install <component...>`
+
+Install one or more tool components from the tools release asset that matches this binary's release version.
+
+```sh
+git kura tools install pre-commit
+git kura tools install --all
+```
+
+`install` downloads the tools asset archive (`git-kura-tools_<version>.tar.gz`) and its sidecar manifest (`git-kura-tools_<version>.json`) for the same release tag as the binary; the `latest` release is never used. It verifies the archive checksum against the sidecar manifest before extracting the archive. Only the `sha256` checksum algorithm is supported; any other algorithm fails the install. A checksum mismatch is treated as a release asset inconsistency and aborts the install.
+
+A verified archive is cached under `<git-common-dir>/kura/tools/cache/<version>/`. A cache is reused only when its recorded release version, archive name, archive checksum, and checksum algorithm all match the sidecar manifest. Because a release asset is immutable, a cache recorded for the same version that disagrees with the sidecar manifest on the archive checksum is treated as a release asset inconsistency: git-kura fails the install rather than using the cache or silently replacing it with the new bytes.
+
+`install` requires an official release binary. A binary built with `go install` or from source does not have an injected release version, so it cannot download release assets and the install fails.
+
+Installing a component already installed from the same asset is idempotent and reports `skipped`.
+
+### `git kura tools uninstall <component...>`
+
+Remove one or more installed tool components, using local metadata to decide what is safe to remove.
+
+```sh
+git kura tools uninstall pre-commit
+git kura tools uninstall --all
+```
+
+A component with no metadata is reported `not-installed` and nothing changes. For a file-managed component, git-kura removes the destination only when the current file checksum matches the value recorded at install time; a file that no longer matches is treated as user-modified or externally modified and is left in place with a `skipped` result and a reason. An unmanaged file is never removed. For a config-managed component, git-kura reverts the value only when it still equals the value git-kura set; a changed value is left untouched and reported `skipped`. When metadata is corrupt, git-kura cannot decide what is safe and reports `failed` without changing anything.
+
+### Tools install metadata
+
+`install`, `uninstall`, and `status` share a metadata store at `<git-common-dir>/kura/tools/installed.json`, with a lock file at `<git-common-dir>/kura/tools/installed.lock`.
+
+The store records, per installed component, a `schemaVersion`, the component ID, source asset id, release version, release asset name, destination path, installed version, checksum, managed mode (`file` or `config`), component-specific metadata, and `createdAt` / `updatedAt` timestamps.
+
+`install` and `uninstall` take the metadata lock for the whole read-modify-write and write the store atomically. If the lock cannot be acquired within the retry timeout (see `kura.sealLockTimeoutMs`), the command fails with `seal-lock-timeout` (exit code 5) and changes no metadata, file, or config. If the store cannot be read, parsed, or validated against its schema — including an unsupported `schemaVersion` — git-kura refuses the destructive operation and fails without changing anything. `status` reads the store without taking the lock, so a held lock never blocks it.
+
 ## Configuration
 
 Kura reads its settings from Git config, so they follow Git's standard scope resolution (local / global / system).
 
 ### `kura.sealLockTimeoutMs`
 
-Maximum time, in milliseconds, that `seal claim`, `seal unclaim`, and `close` wait to acquire the seal store lock (`paths.lock`) before failing with `seal-lock-timeout` (exit code 5).
+Maximum time, in milliseconds, that `seal claim`, `seal unclaim`, and `close` wait to acquire the seal store lock (`paths.lock`), and that `tools install` and `tools uninstall` wait to acquire the tools metadata lock (`installed.lock`), before failing with `seal-lock-timeout` (exit code 5).
 
 ```sh
 git config kura.sealLockTimeoutMs 5000
@@ -310,4 +377,4 @@ Kura uses stable exit codes so scripts and AI-agent workflows can react correctl
 | 7 | Seal doctor error |
 | 8 | Guard conflict |
 
-Exit code 5 is signalled by `seal claim`, `seal unclaim`, and `close`. Exit code 6 is signalled by `seal claim`, `seal unclaim`, and `seal test`. Exit code 7 is signalled by `seal doctor` when the seal store fails integrity validation. Exit code 8 is signalled by `guard acquire` when the worktree is already guarded. The stderr message always starts with a stable reason token (`seal-lock-timeout:`, `seal-conflict:`, `seal-doctor-error:`, or `guard-active:`) that scripts can match without parsing arbitrary text.
+Exit code 5 is signalled by `seal claim`, `seal unclaim`, `close`, `tools install`, and `tools uninstall`. Exit code 6 is signalled by `seal claim`, `seal unclaim`, and `seal test`. Exit code 7 is signalled by `seal doctor` when the seal store fails integrity validation. Exit code 8 is signalled by `guard acquire` when the worktree is already guarded. The stderr message always starts with a stable reason token (`seal-lock-timeout:` or `tools-metadata-lock-timeout:` for code 5, `seal-conflict:`, `seal-doctor-error:`, or `guard-active:`) that scripts can match without parsing arbitrary text.

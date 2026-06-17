@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/cmd/git-kura/schema/tools_metadata.schema.json",
+  "title": "git kura tools install metadata",
+  "description": "Schema for <git-common-dir>/kura/tools/installed.json, the record of git-kura managed tool components installed in this repository.",
+  "type": "object",
+  "required": ["schemaVersion", "components"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "components": {
+      "type": "object",
+      "description": "Map from component ID to its install metadata entry.",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "component",
+          "managedMode",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The component ID this entry describes."
+          },
+          "sourceAssetId": {
+            "type": "string",
+            "description": "Identifier of the source asset within the tools archive."
+          },
+          "releaseVersion": {
+            "type": "string",
+            "description": "git-kura release version the asset was taken from."
+          },
+          "releaseAssetName": {
+            "type": "string",
+            "description": "Name of the tools release asset archive."
+          },
+          "destinationPath": {
+            "type": "string",
+            "description": "Filesystem path or config key the component manages."
+          },
+          "installedVersion": {
+            "type": "string",
+            "description": "Version recorded for the installed component."
+          },
+          "checksum": {
+            "type": "string",
+            "description": "Checksum of the managed file or value, used to detect external modification."
+          },
+          "managedMode": {
+            "type": "string",
+            "enum": ["file", "config"],
+            "description": "Whether the component manages a file or a git config value."
+          },
+          "componentMetadata": {
+            "type": "object",
+            "description": "Component-specific metadata opaque to the framework."
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "RFC3339 timestamp of first install."
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "RFC3339 timestamp of the most recent install/update."
+          }
+        }
+      }
+    }
+  }
+}
