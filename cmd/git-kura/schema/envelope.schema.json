@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/cmd/git-kura/schema/envelope.schema.json",
+  "title": "git kura — structured output envelope",
+  "description": "Common envelope for the structured (--json) output of git kura commands. Command-specific data and error.details schemas are layered on top of this envelope in follow-up issues.",
+  "type": "object",
+  "required": [
+    "ok",
+    "command",
+    "schemaVersion",
+    "warnings"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "ok": {
+      "type": "boolean",
+      "description": "Whether the command execution succeeded."
+    },
+    "command": {
+      "type": "string",
+      "description": "Canonical identifier of the command execution.",
+      "enum": [
+        "get",
+        "open",
+        "close",
+        "ls",
+        "seal.claim",
+        "seal.unclaim",
+        "seal.test",
+        "seal.ls",
+        "seal.doctor",
+        "guard.acquire",
+        "guard.release",
+        "guard.status"
+      ]
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version of the common envelope."
+    },
+    "data": {
+      "type": "object",
+      "description": "Command-specific success payload. Present only when ok is true."
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Non-fatal diagnostics. Always an array, on both success and failure.",
+      "items": { "$ref": "#/$defs/warning" }
+    },
+    "error": {
+      "$ref": "#/$defs/error",
+      "description": "Machine-readable error. Present only when ok is false."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "ok": { "const": true } },
+        "required": ["ok"]
+      },
+      "then": {
+        "required": ["data"],
+        "not": { "required": ["error"] }
+      }
+    },
+    {
+      "if": {
+        "properties": { "ok": { "const": false } },
+        "required": ["ok"]
+      },
+      "then": {
+        "required": ["error"],
+        "not": { "required": ["data"] }
+      }
+    }
+  ],
+  "$defs": {
+    "warning": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Hyphen-case warning token."
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable warning message."
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Hyphen-case reason token, matching the stderr error output and exit-code names."
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable error message."
+        },
+        "details": {
+          "type": "object",
+          "description": "Command-specific error details."
+        }
+      }
+    }
+  }
+}
