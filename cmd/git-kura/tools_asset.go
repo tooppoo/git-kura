@@ -336,11 +336,24 @@ func extractTarGz(data []byte, destRoot string) error {
 			return fmt.Errorf("read tar entry: %w", err)
 		}
 
+		// Tar entry names use "/" separators. A backslash is never a valid
+		// separator in the archive, but filepath would treat it as one on
+		// Windows, so reject it outright rather than let it become a separator
+		// that escapes destRoot.
+		if strings.Contains(hdr.Name, `\`) {
+			return fmt.Errorf("archive entry %q contains a non-/ path separator", hdr.Name)
+		}
 		clean := path.Clean(hdr.Name)
 		if path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
 			return fmt.Errorf("archive entry %q escapes the asset root", hdr.Name)
 		}
 		target := filepath.Join(destRoot, filepath.FromSlash(clean))
+		// Defense in depth: confirm the resolved path stays under destRoot on the
+		// host filesystem regardless of platform separator handling.
+		if rel, err := filepath.Rel(destRoot, target); err != nil ||
+			rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("archive entry %q escapes the asset root", hdr.Name)
+		}
 
 		switch hdr.Typeflag {
 		case tar.TypeDir:

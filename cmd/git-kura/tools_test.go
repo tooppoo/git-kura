@@ -1139,6 +1139,24 @@ func TestExtractTarGzFailsWhenFileTargetIsADir(t *testing.T) {
 	}
 }
 
+func TestExtractTarGzRejectsBackslashTraversal(t *testing.T) {
+	// On Windows a backslash entry name would become a path separator via
+	// filepath and could escape destRoot, so it must be rejected on every
+	// platform.
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	hdr := &tar.Header{Name: `..\escape.txt`, Mode: 0o644, Size: 3, Typeflag: tar.TypeReg}
+	_ = tw.WriteHeader(hdr)
+	_, _ = tw.Write([]byte("bad"))
+	_ = tw.Close()
+	_ = gz.Close()
+
+	if err := extractTarGz(buf.Bytes(), filepath.Join(t.TempDir(), "root")); err == nil {
+		t.Fatal("backslash entry should be rejected")
+	}
+}
+
 func TestExtractTarGzRejectsInvalidGzip(t *testing.T) {
 	if err := extractTarGz([]byte("not a gzip stream"), t.TempDir()); err == nil {
 		t.Fatal("invalid gzip should be rejected")
