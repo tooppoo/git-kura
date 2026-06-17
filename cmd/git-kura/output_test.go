@@ -206,6 +206,107 @@ func TestNormalizeWarningsNeverReturnsNil(t *testing.T) {
 	if got := normalizeWarnings(nil); got == nil || len(got) != 0 {
 		t.Fatalf("normalizeWarnings(nil) = %v, want empty non-nil slice", got)
 	}
+	// A non-nil slice must be returned unchanged rather than reallocated.
+	in := []Warning{{Code: "x", Message: "y"}}
+	if got := normalizeWarnings(in); len(got) != 1 || got[0] != in[0] {
+		t.Fatalf("normalizeWarnings(%v) = %v, want it unchanged", in, got)
+	}
+}
+
+func TestCommandErrorErrorReturnsMessage(t *testing.T) {
+	e := &CommandError{Command: commandClose, Code: "unsafe-refused", Message: "boom"}
+	if e.Error() != "boom" {
+		t.Fatalf("Error() = %q, want %q", e.Error(), "boom")
+	}
+}
+
+func TestJSONRendererCarriesWarnings(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := selectRenderer(renderJSON)
+	if err := r.RenderResult(&stdout, &stderr, Result{
+		Command:  commandOpen,
+		Data:     sampleData{Value: "x"},
+		Warnings: []Warning{{Code: "stale-metadata", Message: "metadata is stale"}},
+	}); err != nil {
+		t.Fatalf("RenderResult: %v", err)
+	}
+	requireConformsToEnvelopeSchema(t, stdout.String())
+	env := decodeEnvelope(t, stdout.String())
+	warnings, ok := env["warnings"].([]any)
+	if !ok || len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want one entry", env["warnings"])
+	}
+}
+
+func TestHumanRendererSkipsNonRenderableData(t *testing.T) {
+	// Data that does not implement HumanRenderable produces no stdout; warnings
+	// still go to stderr.
+	var stdout, stderr bytes.Buffer
+	r := selectRenderer(renderHuman)
+	if err := r.RenderResult(&stdout, &stderr, Result{
+		Command:  commandLs,
+		Data:     struct{ N int }{N: 1},
+		Warnings: []Warning{{Code: "heads-up", Message: "note"}},
+	}); err != nil {
+		t.Fatalf("RenderResult: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty for non-renderable data", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "note") {
+		t.Fatalf("stderr = %q, want it to contain the warning", stderr.String())
+	}
+}
+
+// failWriter fails every write, so tests can exercise the renderers' and
+// encoder's write-error return paths.
+type failWriter struct{}
+
+func (failWriter) Write(p []byte) (int, error) { return 0, fmt.Errorf("write failed") }
+
+func TestRenderersPropagateWriteErrors(t *testing.T) {
+	json := selectRenderer(renderJSON)
+	human := selectRenderer(renderHuman)
+	var discard bytes.Buffer
+
+	t.Run("json result write failure", func(t *testing.T) {
+		err := json.RenderResult(failWriter{}, &discard, Result{Command: commandGet, Data: sampleData{Value: "x"}})
+		if err == nil {
+			t.Fatal("RenderResult on failing stdout = nil, want error")
+		}
+	})
+	t.Run("json error write failure", func(t *testing.T) {
+		err := json.RenderError(failWriter{}, &discard, &CommandError{Command: commandGet, Code: "x", Message: "y"})
+		if err == nil {
+			t.Fatal("RenderError on failing stdout = nil, want error")
+		}
+	})
+	t.Run("human data write failure", func(t *testing.T) {
+		err := human.RenderResult(failWriter{}, &discard, Result{Command: commandGet, Data: sampleData{Value: "x"}})
+		if err == nil {
+			t.Fatal("RenderResult on failing stdout = nil, want error")
+		}
+	})
+	t.Run("human warning write failure", func(t *testing.T) {
+		err := human.RenderResult(&discard, failWriter{}, Result{
+			Command:  commandGet,
+			Warnings: []Warning{{Code: "x", Message: "y"}},
+		})
+		if err == nil {
+			t.Fatal("RenderResult on failing stderr = nil, want error")
+		}
+	})
+	t.Run("human error warning write failure", func(t *testing.T) {
+		err := human.RenderError(&discard, failWriter{}, &CommandError{
+			Command:  commandGet,
+			Code:     "x",
+			Message:  "y",
+			Warnings: []Warning{{Code: "w", Message: "z"}},
+		})
+		if err == nil {
+			t.Fatal("RenderError on failing stderr = nil, want error")
+		}
+	})
 }
 
 func TestEnvelopeOmitsDataWhenNilEvenThoughSchemaRejectsIt(t *testing.T) {
@@ -219,6 +320,24 @@ func TestEnvelopeOmitsDataWhenNilEvenThoughSchemaRejectsIt(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("encodeEnvelope with nil data on success = nil error, want schema violation")
+	}
+}
+
+func TestWriteEnvelopePropagatesEncodeError(t *testing.T) {
+	// ok:true without data violates the schema, so encodeEnvelope fails and
+	// writeEnvelope must propagate the error without writing partial output.
+	var buf bytes.Buffer
+	err := writeEnvelope(&buf, Envelope{
+		OK:            true,
+		Command:       commandGet,
+		SchemaVersion: envelopeSchemaVersion,
+		Warnings:      []Warning{},
+	})
+	if err == nil {
+		t.Fatal("writeEnvelope with invalid envelope = nil, want error")
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("buf = %q, want empty on encode failure", buf.String())
 	}
 }
 
