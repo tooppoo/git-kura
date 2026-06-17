@@ -94,10 +94,13 @@ var allCommands = []Command{
 }
 
 // Warning is a non-fatal diagnostic attached to a command execution. Warnings
-// are reported in both successful and failed envelopes.
+// are reported in both successful and failed envelopes. Details carries optional
+// command-specific structure (for example the conflicts found by open --dry-run)
+// and is treated as opaque by renderers.
 type Warning struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	Details any    `json:"details,omitempty"`
 }
 
 // envelopeError is the machine-readable error of a failed command. Code uses the

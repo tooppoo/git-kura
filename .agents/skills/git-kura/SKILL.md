@@ -148,7 +148,7 @@ If no issues are found, say so and name the checks performed.
 - CLI tests and integration helpers: `cmd/git-kura/*_test.go`.
 - Worktree path, metadata, and state helpers: `internal/worktree/`.
 - Git command wrappers: `internal/gitutil/`.
-- Structured output schema: `cmd/git-kura/schema/output.schema.json`.
+- Structured output schemas: `cmd/git-kura/schema/envelope.schema.json` plus command-specific `*_data.schema.json` files (for example `get_data.schema.json`).
 - User docs: `README.md` and `docs/`.
 - ADRs: `docs/adr/`.
 

@@ -122,15 +122,16 @@ func TestRunCommandsInProcess(t *testing.T) {
 			t.Fatalf("get --branch before open stdout = %q, want empty", stdout)
 		}
 
+		// get --json is a structured request: an execution-time failure before the
+		// worktree is open is reported as an ok:false envelope on stdout, with the
+		// renderer having already written it (run returns a non-nil sentinel).
 		stdout, err = captureStdout(t, func() error {
 			return run([]string{"get", "51", "--json"})
 		})
 		if err == nil {
 			t.Fatal("get --json before open error = nil, want error")
 		}
-		if stdout != "" {
-			t.Fatalf("get --json before open stdout = %q, want empty", stdout)
-		}
+		requireErrorEnvelope(t, stdout, "get")
 
 		stdout, err = captureStdout(t, func() error {
 			return run([]string{"get", "51", "--root"})
@@ -142,15 +143,18 @@ func TestRunCommandsInProcess(t *testing.T) {
 			t.Fatalf("get --root before open stdout = %q, want empty", stdout)
 		}
 
+		// open --dry-run on its own renders human-readable output, not a JSON object.
 		stdout, err = captureStdout(t, func() error {
 			return run([]string{"open", "51", "--dry-run"})
 		})
 		if err != nil {
 			t.Fatalf("open --dry-run error = %v", err)
 		}
-		dryRun := requireJSONMetadata(t, stdout)
-		if dryRun["branch"] != "51" || dryRun["worktreePath"] != expectedWorktreePath(repo, "51") {
-			t.Fatalf("dry-run metadata = %+v, want branch 51 and path %s", dryRun, expectedWorktreePath(repo, "51"))
+		if strings.Contains(stdout, "\"ok\"") {
+			t.Fatalf("open --dry-run stdout must not be an envelope: %q", stdout)
+		}
+		if !strings.Contains(stdout, "51") || !strings.Contains(stdout, expectedWorktreePath(repo, "51")) {
+			t.Fatalf("dry-run output = %q, want branch 51 and path %s", stdout, expectedWorktreePath(repo, "51"))
 		}
 
 		if err := run([]string{"open", "51"}); err != nil {
@@ -232,9 +236,9 @@ func TestRunCommandErrorPathsInProcess(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get --json dirty error = %v", err)
 		}
-		metadata := requireJSONMetadata(t, stdout)
-		if metadata["dirty"] != true {
-			t.Fatalf("dirty = %v, want true", metadata["dirty"])
+		data := requireSuccessEnvelopeData(t, stdout, "get", getDataSchema)
+		if data["dirty"] != true {
+			t.Fatalf("dirty = %v, want true", data["dirty"])
 		}
 	})
 }
@@ -280,6 +284,109 @@ func TestRunStructuredOutputRequiresMetadataForExistingWorktree(t *testing.T) {
 		if err := run([]string{"close", "51"}); err != nil {
 			t.Fatalf("close with missing metadata error = %v, want nil", err)
 		}
+	})
+}
+
+func TestRunGetAllModesInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		if err := run([]string{"open", "51"}); err != nil {
+			t.Fatalf("open error = %v", err)
+		}
+
+		branch, err := captureStdout(t, func() error { return run([]string{"get", "51", "--branch"}) })
+		if err != nil {
+			t.Fatalf("get --branch error = %v", err)
+		}
+		if strings.TrimSpace(branch) != "51" {
+			t.Fatalf("get --branch = %q, want 51", branch)
+		}
+
+		root, err := captureStdout(t, func() error { return run([]string{"get", "51", "--root"}) })
+		if err != nil {
+			t.Fatalf("get --root error = %v", err)
+		}
+		if strings.TrimSpace(root) != repo {
+			t.Fatalf("get --root = %q, want %s", root, repo)
+		}
+
+		toon, err := captureStdout(t, func() error { return run([]string{"get", "51", "--toon"}) })
+		if err != nil {
+			t.Fatalf("get --toon error = %v", err)
+		}
+		if !strings.Contains(toon, "worktreePath") {
+			t.Fatalf("get --toon = %q, want it to contain worktreePath", toon)
+		}
+
+		// --format json is an alias of --json and produces the same envelope.
+		shortJSON, err := captureStdout(t, func() error { return run([]string{"get", "51", "--json"}) })
+		if err != nil {
+			t.Fatalf("get --json error = %v", err)
+		}
+		formatJSON, err := captureStdout(t, func() error { return run([]string{"get", "51", "--format", "json"}) })
+		if err != nil {
+			t.Fatalf("get --format json error = %v", err)
+		}
+		requireSuccessEnvelopeData(t, formatJSON, "get", getDataSchema)
+		if shortJSON != formatJSON {
+			t.Fatalf("--json and --format json differ:\n%s\n%s", shortJSON, formatJSON)
+		}
+	})
+}
+
+func TestRunOpenDryRunJSONInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		// Create the worktree first so the dry run finds all three conflicts:
+		// worktree path, branch, and metadata.
+		if err := run([]string{"open", "51"}); err != nil {
+			t.Fatalf("open error = %v", err)
+		}
+
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"open", "51", "--dry-run", "--json"})
+		})
+		if err != nil {
+			t.Fatalf("open --dry-run --json error = %v", err)
+		}
+
+		data := requireSuccessEnvelopeData(t, stdout, "open", openDryRunDataSchema)
+		if data["worktreePath"] != expectedWorktreePath(repo, "51") {
+			t.Fatalf("worktreePath = %v, want %s", data["worktreePath"], expectedWorktreePath(repo, "51"))
+		}
+
+		env := requireJSONMetadata(t, stdout)
+		warnings := env["warnings"].([]any)
+		if len(warnings) != 1 {
+			t.Fatalf("warnings = %v, want one", warnings)
+		}
+		details := warnings[0].(map[string]any)["details"].(map[string]any)
+		if len(details["conflicts"].([]any)) != 3 {
+			t.Fatalf("conflicts = %v, want three", details["conflicts"])
+		}
+
+		// The dry run must not have removed or altered the existing worktree.
+		assertPathExists(t, expectedWorktreePath(repo, "51"))
+	})
+}
+
+func TestRunOpenDryRunJSONReportsExecutionFailure(t *testing.T) {
+	outside := t.TempDir()
+
+	withWorkingDir(t, outside, func() {
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"open", "51", "--json", "--dry-run"})
+		})
+		if err == nil {
+			t.Fatal("open --json --dry-run outside repo error = nil, want error")
+		}
+		// A valid dry-run JSON request that fails at execution time emits an
+		// ok:false envelope on stdout.
+		requireErrorEnvelope(t, stdout, "open")
 	})
 }
 

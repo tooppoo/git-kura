@@ -37,7 +37,6 @@ func TestRepositoryContext(t *testing.T) {
 	}{
 		{name: "get path fails outside repository", args: []string{"get", "51", "--path"}},
 		{name: "get branch fails outside repository", args: []string{"get", "51", "--branch"}},
-		{name: "get json fails outside repository", args: []string{"get", "51", "--json"}},
 		{name: "open fails outside repository", args: []string{"open", "51"}},
 		{name: "close fails outside repository", args: []string{"close", "51"}},
 		{name: "ls fails outside repository", args: []string{"ls"}},
@@ -52,6 +51,22 @@ func TestRepositoryContext(t *testing.T) {
 			assertPathMissing(t, filepath.Join(outside, ".git-kura.toml"))
 		})
 	}
+
+	// get --json is a structured request, so an execution-time failure (here,
+	// running outside a repository) is reported as an ok:false envelope on stdout
+	// rather than a bare stderr message.
+	t.Run("get json fails outside repository", func(t *testing.T) {
+		result := cli.gitKura(outside, "get", "51", "--json")
+		requireNonZeroExitCode(t, result)
+		requireEmptyStderr(t, result)
+		env := requireErrorEnvelope(t, result.stdout, "get")
+		errObj := env["error"].(map[string]any)
+		if !strings.Contains(errObj["message"].(string), "repository") {
+			t.Fatalf("error.message = %v, want it to mention the repository", errObj["message"])
+		}
+		assertPathMissing(t, filepath.Join(outside, ".git"))
+		assertPathMissing(t, expectedStateDir(outside))
+	})
 }
 
 func TestKeyValidationRejectsUnsafeKeysWithoutFilesystemChanges(t *testing.T) {
@@ -277,29 +292,148 @@ func TestOpenDryRunPrintsPlannedWorktree(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
+	// open --dry-run on its own prints human-readable output (not a JSON object)
+	// and shows at least the planned worktree path, branch, repository root, and
+	// base branch.
 	result := cli.gitKura(repo, "open", "51", "--dry-run")
 	requireExitCode(t, result, 0)
 	requireEmptyStderr(t, result)
-	requireConformsToOutputSchema(t, result.stdout)
-
-	metadata := requireJSONMetadata(t, result.stdout)
-	if metadata["branch"] != "51" {
-		t.Fatalf("dry-run branch = %v, want 51", metadata["branch"])
+	if strings.Contains(result.stdout, "\"ok\"") {
+		t.Fatalf("open --dry-run stdout must not be a JSON envelope: %q", result.stdout)
 	}
-	if metadata["worktreePath"] != expectedWorktreePath(repo, "51") {
-		t.Fatalf("dry-run worktreePath = %v, want %s", metadata["worktreePath"], expectedWorktreePath(repo, "51"))
-	}
-	if metadata["baseBranch"] != "main" {
-		t.Fatalf("dry-run baseBranch = %v, want main", metadata["baseBranch"])
-	}
-	if metadata["exists"] != false {
-		t.Fatalf("dry-run exists = %v, want false", metadata["exists"])
-	}
-	if metadata["dirty"] != false {
-		t.Fatalf("dry-run dirty = %v, want false", metadata["dirty"])
+	for _, want := range []string{
+		expectedWorktreePath(repo, "51"),
+		"51",
+		repo,
+		"main",
+	} {
+		if !strings.Contains(result.stdout, want) {
+			t.Fatalf("dry-run output = %q, want it to contain %q", result.stdout, want)
+		}
 	}
 	assertPathMissing(t, expectedWorktreePath(repo, "51"))
 	assertPathMissing(t, expectedMetadataPath(repo, "51"))
+}
+
+func TestOpenDryRunJSONPrintsEnvelope(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	for _, args := range [][]string{
+		{"open", "51", "--dry-run", "--json"},
+		{"open", "51", "--json", "--dry-run"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			result := cli.gitKura(repo, args...)
+			requireExitCode(t, result, 0)
+			requireEmptyStderr(t, result)
+
+			data := requireSuccessEnvelopeData(t, result.stdout, "open", openDryRunDataSchema)
+			if data["branch"] != "51" {
+				t.Fatalf("dry-run branch = %v, want 51", data["branch"])
+			}
+			if data["worktreePath"] != expectedWorktreePath(repo, "51") {
+				t.Fatalf("dry-run worktreePath = %v, want %s", data["worktreePath"], expectedWorktreePath(repo, "51"))
+			}
+			if data["baseBranch"] != "main" {
+				t.Fatalf("dry-run baseBranch = %v, want main", data["baseBranch"])
+			}
+			if data["exists"] != false || data["dirty"] != false {
+				t.Fatalf("dry-run exists/dirty = %v/%v, want false/false", data["exists"], data["dirty"])
+			}
+
+			env := requireJSONMetadata(t, result.stdout)
+			if warnings, ok := env["warnings"].([]any); !ok || len(warnings) != 0 {
+				t.Fatalf("warnings = %v, want empty array for a non-conflicting dry run", env["warnings"])
+			}
+
+			assertPathMissing(t, expectedWorktreePath(repo, "51"))
+			assertPathMissing(t, expectedMetadataPath(repo, "51"))
+		})
+	}
+}
+
+func TestOpenDryRunReportsConflictsAsWarnings(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	// Actually create the worktree so the worktree path, branch, and metadata all
+	// already exist; a subsequent dry run must report all three as conflicts.
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+
+	result := cli.gitKura(repo, "open", "51", "--dry-run", "--json")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+	requireConformsToEnvelopeSchema(t, result.stdout)
+
+	env := requireJSONMetadata(t, result.stdout)
+	if env["ok"] != true {
+		t.Fatalf("conflicting dry-run ok = %v, want true", env["ok"])
+	}
+	warnings, ok := env["warnings"].([]any)
+	if !ok || len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want one entry", env["warnings"])
+	}
+	warning := warnings[0].(map[string]any)
+	if warning["code"] != "open-dry-run-conflict" {
+		t.Fatalf("warning code = %v, want open-dry-run-conflict", warning["code"])
+	}
+	details := warning["details"].(map[string]any)
+	conflicts, ok := details["conflicts"].([]any)
+	if !ok || len(conflicts) != 3 {
+		t.Fatalf("conflicts = %v, want three entries", details["conflicts"])
+	}
+	gotTypes := map[string]bool{}
+	for _, c := range conflicts {
+		gotTypes[c.(map[string]any)["type"].(string)] = true
+	}
+	for _, want := range []string{"worktree-path", "branch", "metadata"} {
+		if !gotTypes[want] {
+			t.Fatalf("conflict types = %v, want it to contain %q", gotTypes, want)
+		}
+	}
+}
+
+func TestOpenDryRunReportsSingleConflict(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	// Create only the branch (no worktree, no metadata) so the dry run reports
+	// exactly one conflict, of type branch.
+	git(t, repo, "branch", "51")
+
+	result := cli.gitKura(repo, "open", "51", "--dry-run", "--json")
+	requireExitCode(t, result, 0)
+
+	env := requireJSONMetadata(t, result.stdout)
+	warnings := env["warnings"].([]any)
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want one entry", warnings)
+	}
+	details := warnings[0].(map[string]any)["details"].(map[string]any)
+	conflicts := details["conflicts"].([]any)
+	if len(conflicts) != 1 {
+		t.Fatalf("conflicts = %v, want exactly one", conflicts)
+	}
+	if conflicts[0].(map[string]any)["type"] != "branch" {
+		t.Fatalf("conflict type = %v, want branch", conflicts[0].(map[string]any)["type"])
+	}
+}
+
+func TestOpenDryRunHumanShowsConflictWarning(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+
+	result := cli.gitKura(repo, "open", "51", "--dry-run")
+	requireExitCode(t, result, 0)
+	if !strings.Contains(result.stderr, "warning") {
+		t.Fatalf("stderr = %q, want it to contain a warning", result.stderr)
+	}
+	if !strings.Contains(result.stderr, "conflict") {
+		t.Fatalf("stderr = %q, want it to mention the conflict", result.stderr)
+	}
 }
 
 func TestOpenStoresWorktreeAndMetadataInGitCommonDir(t *testing.T) {
@@ -332,9 +466,9 @@ func TestGetStructuredOutputUsesOpenTimeBaseBranch(t *testing.T) {
 	result := cli.gitKura(repo, "get", "51", "--json")
 	requireExitCode(t, result, 0)
 
-	metadata := requireJSONMetadata(t, result.stdout)
-	if metadata["baseBranch"] != "main" {
-		t.Fatalf("json baseBranch = %v, want open-time base branch main", metadata["baseBranch"])
+	data := requireSuccessEnvelopeData(t, result.stdout, "get", getDataSchema)
+	if data["baseBranch"] != "main" {
+		t.Fatalf("json baseBranch = %v, want open-time base branch main", data["baseBranch"])
 	}
 }
 
@@ -349,9 +483,8 @@ func TestGetStructuredOutputFailsWhenMetadataIsMissing(t *testing.T) {
 
 	jsonResult := cli.gitKura(repo, "get", "51", "--json")
 	requireNonZeroExitCode(t, jsonResult)
-	requireEmptyStdout(t, jsonResult)
-	requireStderrContains(t, jsonResult, "metadata")
-	requireStderrContains(t, jsonResult, "missing")
+	requireEmptyStderr(t, jsonResult)
+	requireErrorEnvelopeMessageContains(t, jsonResult.stdout, "get", "metadata", "missing")
 
 	toonResult := cli.gitKura(repo, "get", "51", "--toon")
 	requireNonZeroExitCode(t, toonResult)
@@ -381,10 +514,8 @@ func TestGetStructuredOutputFailsWhenWorktreeIsMissing(t *testing.T) {
 
 	jsonResult := cli.gitKura(repo, "get", "51", "--json")
 	requireNonZeroExitCode(t, jsonResult)
-	requireEmptyStdout(t, jsonResult)
-	requireStderrContains(t, jsonResult, "worktree")
-	requireStderrContains(t, jsonResult, "missing")
-	requireStderrContains(t, jsonResult, "metadata exists")
+	requireEmptyStderr(t, jsonResult)
+	requireErrorEnvelopeMessageContains(t, jsonResult.stdout, "get", "worktree", "missing", "metadata exists")
 }
 
 func TestGetStructuredOutputFailsForUnopenedKey(t *testing.T) {
@@ -395,9 +526,8 @@ func TestGetStructuredOutputFailsForUnopenedKey(t *testing.T) {
 
 	jsonResult := cli.gitKura(repo, "get", "2", "--json")
 	requireNonZeroExitCode(t, jsonResult)
-	requireEmptyStdout(t, jsonResult)
-	requireStderrContains(t, jsonResult, "not open")
-	requireStderrContains(t, jsonResult, "git kura open 2")
+	requireEmptyStderr(t, jsonResult)
+	requireErrorEnvelopeMessageContains(t, jsonResult.stdout, "get", "not open", "git kura open 2")
 
 	toonResult := cli.gitKura(repo, "get", "2", "--toon")
 	requireNonZeroExitCode(t, toonResult)
@@ -439,7 +569,72 @@ func TestGetJSONOutputConformsToSchema(t *testing.T) {
 	result := cli.gitKura(repo, "get", "51", "--json")
 	requireExitCode(t, result, 0)
 
-	requireConformsToOutputSchema(t, result.stdout)
+	requireSuccessEnvelopeData(t, result.stdout, "get", getDataSchema)
+}
+
+func TestGetFormatJSONIsAliasForJSON(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+
+	jsonResult := cli.gitKura(repo, "get", "51", "--json")
+	requireExitCode(t, jsonResult, 0)
+	formatResult := cli.gitKura(repo, "get", "51", "--format", "json")
+	requireExitCode(t, formatResult, 0)
+
+	// --format json is an alias of --json and produces the same envelope.
+	requireSuccessEnvelopeData(t, formatResult.stdout, "get", getDataSchema)
+	if jsonResult.stdout != formatResult.stdout {
+		t.Fatalf("--json and --format json differ:\n--json: %s\n--format json: %s", jsonResult.stdout, formatResult.stdout)
+	}
+}
+
+func TestGetScalarAndJSONCombinationIsUsageError(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+
+	// Scalar output and JSON output are mutually exclusive. Combining them is a
+	// normal usage error (exit code 2, stderr message, no JSON envelope), not a
+	// valid JSON request, regardless of flag order.
+	for _, args := range [][]string{
+		{"get", "51", "--path", "--json"},
+		{"get", "51", "--json", "--path"},
+		{"get", "51", "--path", "--format", "json"},
+		{"get", "51", "--format", "json", "--path"},
+		{"get", "51", "--branch", "--json"},
+		{"get", "51", "--root", "--json"},
+	} {
+		t.Run(strings.Join(args[1:], " "), func(t *testing.T) {
+			result := cli.gitKura(repo, args...)
+			requireExitCode(t, result, 2)
+			requireEmptyStdout(t, result)
+			if result.stderr == "" {
+				t.Fatal("stderr = empty, want a usage error message")
+			}
+			if strings.Contains(result.stderr, "\"ok\"") {
+				t.Fatalf("usage error must not be a JSON envelope: %q", result.stderr)
+			}
+		})
+	}
+}
+
+func TestOpenJSONWithoutDryRunIsUsageError(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	// Structured output for the real creation path is out of scope for this
+	// migration, so --json without --dry-run is a usage error rather than a
+	// silently ignored flag.
+	result := cli.gitKura(repo, "open", "51", "--json")
+	requireExitCode(t, result, 2)
+	requireEmptyStdout(t, result)
+	if result.stderr == "" {
+		t.Fatal("stderr = empty, want a usage error message")
+	}
+	assertPathMissing(t, expectedWorktreePath(repo, "51"))
 }
 
 func TestLsNoOpenWorktrees(t *testing.T) {

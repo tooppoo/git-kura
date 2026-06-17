@@ -44,11 +44,14 @@ Create the branch and worktree for the given key.
 ```sh
 git kura open 51
 git kura open 51 --dry-run
+git kura open 51 --dry-run --json
 ```
 
 If the corresponding branch or worktree already exists, Kura should not create a conflicting workspace.
 
-`--dry-run` does not create the branch, worktree, or metadata. It prints the planned worktree as JSON using the same schema as `git kura get <N> --json`.
+`--dry-run` does not create the branch, worktree, or metadata. On its own it prints human-readable output showing the planned worktree path, branch, repository root, and base branch. With `--json` it prints the common output envelope instead, with the planned worktree under `data`.
+
+A dry run also checks, without side effects, conditions that would collide at real creation time: an existing worktree path, branch, or metadata. Such a conflict does not fail the command; the dry run still succeeds with exit code `0` and reports each conflict as a warning (`open-dry-run-conflict`). In JSON mode the warnings appear in `warnings[]` with the colliding items under `details.conflicts`.
 
 ## `git kura get <key>`
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,23 +23,32 @@ import (
 // https://goreleaser.com/resources/cookbooks/using-main.version/
 var version string = "dev"
 
-//go:embed schema/output.schema.json
-var outputSchemaJSON []byte
+//go:embed schema/get_data.schema.json
+var getDataSchemaJSON []byte
 
-var outputSchema = mustCompileOutputSchema()
+//go:embed schema/open_dry_run_data.schema.json
+var openDryRunDataSchemaJSON []byte
 
-func mustCompileOutputSchema() *jsonschema.Schema {
-	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(outputSchemaJSON))
+// getDataSchema and openDryRunDataSchema are the command-specific schemas for the
+// data payload nested under the common envelope's data field. They version
+// independently of the envelope schema.
+var (
+	getDataSchema        = mustCompileSchema("get_data.schema.json", getDataSchemaJSON)
+	openDryRunDataSchema = mustCompileSchema("open_dry_run_data.schema.json", openDryRunDataSchemaJSON)
+)
+
+func mustCompileSchema(name string, data []byte) *jsonschema.Schema {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
 	if err != nil {
-		panic(fmt.Sprintf("parse output schema: %v", err))
+		panic(fmt.Sprintf("parse %s: %v", name, err))
 	}
 	c := jsonschema.NewCompiler()
-	if err := c.AddResource("output.schema.json", doc); err != nil {
-		panic(fmt.Sprintf("add output schema resource: %v", err))
+	if err := c.AddResource(name, doc); err != nil {
+		panic(fmt.Sprintf("add %s resource: %v", name, err))
 	}
-	sch, err := c.Compile("output.schema.json")
+	sch, err := c.Compile(name)
 	if err != nil {
-		panic(fmt.Sprintf("compile output schema: %v", err))
+		panic(fmt.Sprintf("compile %s: %v", name, err))
 	}
 	return sch
 }
@@ -76,7 +86,12 @@ const openHelp = `Usage: git kura open <key> [flags]
 Create a git worktree for <key> on a new branch <key>.
 
 Flags:
-  --dry-run       Print the worktree that would be created as JSON`
+  --dry-run       Show the worktree that would be created, without creating it
+  --json          With --dry-run, print the result as a JSON envelope
+
+Without --json, --dry-run prints human-readable output. A dry run never creates
+the worktree, branch, or metadata; pre-creation conflicts are reported as
+warnings while the command still succeeds.`
 
 const closeHelp = `Usage: git kura close <key>
 
@@ -103,6 +118,15 @@ type exitError struct {
 func (e *exitError) Error() string { return e.err.Error() }
 func (e *exitError) Unwrap() error { return e.err }
 
+// renderedError is the exit-code-only sentinel a structured-output command
+// returns after a renderer has already written its output (the JSON error
+// envelope or the human stderr message). main exits with the carried code
+// without printing anything further, so it never appends a second stderr line
+// after a JSON error envelope.
+type renderedError struct{ code int }
+
+func (e *renderedError) Error() string { return "" }
+
 // exitCodeError wraps err with a specific exit code. Returns nil when err is nil
 // so callers can pass through optional errors without a nil check.
 func exitCodeError(code int, err error) error {
@@ -128,6 +152,12 @@ const (
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		// A renderer has already written this failure's output; only carry the
+		// exit code, do not print again.
+		var re *renderedError
+		if errors.As(err, &re) {
+			os.Exit(re.code)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		var xe *exitError
 		if errors.As(err, &xe) {
@@ -158,7 +188,7 @@ func run(args []string) error {
 		}
 		key, opts, err := parseGetArgs(args[1:])
 		if err != nil {
-			return err
+			return exitCodeError(exitUsageError, err)
 		}
 		return cmdGet(key, opts)
 
@@ -169,7 +199,7 @@ func run(args []string) error {
 		}
 		key, opts, err := parseOpenArgs(args[1:])
 		if err != nil {
-			return err
+			return exitCodeError(exitUsageError, err)
 		}
 		return cmdOpen(key, opts)
 
@@ -236,6 +266,7 @@ type getOptions struct {
 
 type openOptions struct {
 	DryRun bool
+	JSON   bool
 }
 
 func parseGetArgs(args []string) (string, getOptions, error) {
@@ -311,7 +342,7 @@ func parseGetArgs(args []string) (string, getOptions, error) {
 
 func parseOpenArgs(args []string) (string, openOptions, error) {
 	if len(args) == 0 {
-		return "", openOptions{}, fmt.Errorf("usage: git kura open <key> [--dry-run]")
+		return "", openOptions{}, fmt.Errorf("usage: git kura open <key> [--dry-run] [--json]")
 	}
 
 	key := args[0]
@@ -324,9 +355,19 @@ func parseOpenArgs(args []string) (string, openOptions, error) {
 		switch flag {
 		case "--dry-run":
 			opts.DryRun = true
+		case "--json":
+			opts.JSON = true
 		default:
-			return "", openOptions{}, fmt.Errorf("usage: git kura open <key> [--dry-run]: unexpected argument %q", flag)
+			return "", openOptions{}, fmt.Errorf("usage: git kura open <key> [--dry-run] [--json]: unexpected argument %q", flag)
 		}
+	}
+
+	// --json controls output format and, for now, is only supported alongside
+	// --dry-run. Structured output for the real creation path is migrated in a
+	// later issue, so --json without --dry-run is a usage error rather than a
+	// silently ignored flag.
+	if opts.JSON && !opts.DryRun {
+		return "", openOptions{}, fmt.Errorf("conflict: --json is only supported with --dry-run")
 	}
 
 	return key, opts, nil
@@ -351,38 +392,42 @@ func parseKeyOnlyArgs(command string, args []string) (string, error) {
 
 // Command execution
 
+// cmdGet resolves worktree information for key. Scalar output (--path/--branch/
+// --root) and TOON output keep their existing bare-value behavior and report
+// failures as plain errors. JSON output (--json/--format json) is routed through
+// the output framework: success becomes a common envelope and an execution-time
+// failure becomes an ok:false envelope, both on stdout.
 func cmdGet(key string, opts getOptions) error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
-		return fmt.Errorf("not inside a git repository")
+		return getFail(opts, fmt.Errorf("not inside a git repository"))
 	}
 
 	branch := worktree.BranchName(key)
 	path, err := worktree.Path(repoRoot, key)
 	if err != nil {
-		return fmt.Errorf("resolve worktree path: %w", err)
+		return getFail(opts, fmt.Errorf("resolve worktree path: %w", err))
 	}
 
 	_, statErr := os.Stat(path)
 	exists := statErr == nil
 	if statErr != nil && !os.IsNotExist(statErr) {
-		return fmt.Errorf("check worktree path: %w", statErr)
+		return getFail(opts, fmt.Errorf("check worktree path: %w", statErr))
 	}
 
 	meta, metaErr := worktree.ReadStructuredMetadata(repoRoot, key, path, exists)
 	if metaErr != nil {
-		return metaErr
+		return getFail(opts, metaErr)
 	}
 
-	if opts.OutputMode == outputPath {
+	switch opts.OutputMode {
+	case outputPath:
 		fmt.Println(path)
 		return nil
-	}
-	if opts.OutputMode == outputBranch {
+	case outputBranch:
 		fmt.Println(branch)
 		return nil
-	}
-	if opts.OutputMode == outputRoot {
+	case outputRoot:
 		fmt.Println(meta.RepositoryRoot)
 		return nil
 	}
@@ -390,7 +435,7 @@ func cmdGet(key string, opts getOptions) error {
 	dirty := false
 	if exists {
 		if dirty, err = gitutil.WorktreeDirty(path); err != nil {
-			return fmt.Errorf("check worktree status: %w", err)
+			return getFail(opts, fmt.Errorf("check worktree status: %w", err))
 		}
 	}
 
@@ -408,7 +453,10 @@ func cmdGet(key string, opts getOptions) error {
 
 	switch opts.OutputMode {
 	case outputJSON:
-		return printJSON(data)
+		if err := validateData(getDataSchema, data); err != nil {
+			return err
+		}
+		return emitResult(renderJSON, Result{Command: commandGet, Data: data})
 	case outputTOON:
 		return printTOON(data)
 	}
@@ -416,35 +464,30 @@ func cmdGet(key string, opts getOptions) error {
 	return nil
 }
 
+// getFail routes a get failure to the right output. JSON requests render an
+// ok:false envelope on stdout (and return the exit-code-only sentinel); scalar
+// and TOON requests keep the existing plain-error behavior.
+func getFail(opts getOptions, err error) error {
+	if opts.OutputMode != outputJSON {
+		return err
+	}
+	return emitError(renderJSON, toCommandError(commandGet, err))
+}
+
 func cmdOpen(key string, opts openOptions) error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
-		return fmt.Errorf("not inside a git repository")
+		return openFail(opts, fmt.Errorf("not inside a git repository"))
 	}
 
 	path, err := worktree.Path(repoRoot, key)
 	if err != nil {
-		return fmt.Errorf("resolve worktree path: %w", err)
+		return openFail(opts, fmt.Errorf("resolve worktree path: %w", err))
 	}
 	branch := worktree.BranchName(key)
 
 	if opts.DryRun {
-		base, err := gitutil.HeadBranch(repoRoot)
-		if err != nil {
-			return fmt.Errorf("get base branch: %w", err)
-		}
-		data := worktreeJSON{
-			SchemaVersion:  1,
-			Key:            key,
-			Kind:           "worktree",
-			Branch:         branch,
-			WorktreePath:   path,
-			RepositoryRoot: repoRoot,
-			BaseBranch:     base,
-			Exists:         false,
-			Dirty:          false,
-		}
-		return printJSON(data)
+		return cmdOpenDryRun(opts, repoRoot, key, path, branch)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -480,13 +523,178 @@ func cmdOpen(key string, opts openOptions) error {
 	return nil
 }
 
-func printJSON(data worktreeJSON) error {
-	out, _ := json.Marshal(data)
-	inst, _ := jsonschema.UnmarshalJSON(bytes.NewReader(out))
-	if err := outputSchema.Validate(inst); err != nil {
+// cmdOpenDryRun evaluates what open would create for key without any side
+// effects. It always succeeds (the dry-run evaluation completed): an ok:true
+// result, exit code 0. Pre-creation conditions that would collide at real
+// creation time are reported as warnings, not failures. --json renders the
+// common envelope; otherwise the human renderer prints the planned worktree and
+// any warnings.
+func cmdOpenDryRun(opts openOptions, repoRoot, key, path, branch string) error {
+	base, err := gitutil.HeadBranch(repoRoot)
+	if err != nil {
+		return openFail(opts, fmt.Errorf("get base branch: %w", err))
+	}
+
+	data := worktreeJSON{
+		SchemaVersion:  1,
+		Key:            key,
+		Kind:           "worktree",
+		Branch:         branch,
+		WorktreePath:   path,
+		RepositoryRoot: repoRoot,
+		BaseBranch:     base,
+		Exists:         false,
+		Dirty:          false,
+	}
+	if err := validateData(openDryRunDataSchema, data); err != nil {
+		return err
+	}
+
+	warnings := dryRunConflictWarnings(repoRoot, key, path, branch)
+
+	mode := renderHuman
+	if opts.JSON {
+		mode = renderJSON
+	}
+	return emitResult(mode, Result{Command: commandOpen, Data: data, Warnings: warnings})
+}
+
+// openFail routes an open failure to the right output. Only the dry-run JSON
+// request is migrated onto the framework, so it renders an ok:false envelope on
+// stdout; every other open invocation keeps the existing plain-error behavior.
+func openFail(opts openOptions, err error) error {
+	if !(opts.DryRun && opts.JSON) {
+		return err
+	}
+	return emitError(renderJSON, toCommandError(commandOpen, err))
+}
+
+// dryRunConflict is one pre-creation collision found by open --dry-run. Type is
+// one of worktree-path, branch, or metadata; the remaining fields are populated
+// per type.
+type dryRunConflict struct {
+	Type   string `json:"type"`
+	Path   string `json:"path,omitempty"`
+	Branch string `json:"branch,omitempty"`
+}
+
+// dryRunConflictDetails is the warning details payload for open-dry-run-conflict.
+type dryRunConflictDetails struct {
+	Conflicts []dryRunConflict `json:"conflicts"`
+}
+
+// dryRunConflictWarnings checks, without side effects, the conditions that would
+// collide if open actually ran: an existing worktree path, an existing branch,
+// or existing metadata. It returns a single open-dry-run-conflict warning
+// listing every collision found, or nil when there is none. Detection is
+// best-effort: a check that itself errors is treated as "no conflict" so the
+// dry-run never fails on it.
+func dryRunConflictWarnings(repoRoot, key, path, branch string) []Warning {
+	var conflicts []dryRunConflict
+
+	if _, err := os.Stat(path); err == nil {
+		conflicts = append(conflicts, dryRunConflict{Type: "worktree-path", Path: path})
+	}
+	if exists, err := gitutil.BranchExists(repoRoot, branch); err == nil && exists {
+		conflicts = append(conflicts, dryRunConflict{Type: "branch", Branch: branch})
+	}
+	if metaPath, err := worktree.MetadataPath(repoRoot, key); err == nil {
+		if _, err := os.Stat(metaPath); err == nil {
+			conflicts = append(conflicts, dryRunConflict{Type: "metadata", Path: metaPath})
+		}
+	}
+
+	if len(conflicts) == 0 {
+		return nil
+	}
+
+	types := make([]string, len(conflicts))
+	for i, c := range conflicts {
+		types[i] = c.Type
+	}
+	return []Warning{{
+		Code:    "open-dry-run-conflict",
+		Message: fmt.Sprintf("the planned worktree may conflict with existing state: %s", strings.Join(types, ", ")),
+		Details: dryRunConflictDetails{Conflicts: conflicts},
+	}}
+}
+
+// emitResult renders a successful Result through the selected renderer, writing
+// to the process stdout/stderr. Returns nil on success.
+func emitResult(mode renderMode, r Result) error {
+	return selectRenderer(mode).RenderResult(os.Stdout, os.Stderr, r)
+}
+
+// emitError renders a CommandError through the selected renderer and returns the
+// exit-code-only sentinel, so main exits with the command's code without
+// printing the failure again.
+func emitError(mode renderMode, cerr *CommandError) error {
+	if err := selectRenderer(mode).RenderError(os.Stdout, os.Stderr, cerr); err != nil {
+		return err
+	}
+	return &renderedError{code: cerr.ExitCode}
+}
+
+// toCommandError converts a plain command failure into the framework's
+// CommandError, preserving the existing exit-code contract. An *exitError keeps
+// its code and maps to the matching hyphen-case reason token; any other error is
+// a general error (exit code 1).
+func toCommandError(cmd Command, err error) *CommandError {
+	code := "general-error"
+	exitCode := exitGeneralError
+	var xe *exitError
+	if errors.As(err, &xe) {
+		exitCode = xe.code
+		code = reasonForExitCode(xe.code)
+	}
+	return &CommandError{
+		Command:  cmd,
+		Code:     code,
+		Message:  err.Error(),
+		ExitCode: exitCode,
+	}
+}
+
+// reasonForExitCode maps an exit code to the hyphen-case reason token used as the
+// envelope error code, keeping the JSON error code aligned with the exit-code
+// names.
+func reasonForExitCode(code int) string {
+	switch code {
+	case exitUsageError:
+		return "usage-error"
+	case exitUnsafeRefused:
+		return "unsafe-refused"
+	case exitNotFound:
+		return "not-found"
+	case exitSealLockTimeout:
+		return "seal-lock-timeout"
+	case exitSealConflict:
+		return "seal-conflict"
+	case exitSealDoctorError:
+		return "seal-doctor-error"
+	case exitGuardConflict:
+		return "guard-conflict"
+	default:
+		return "general-error"
+	}
+}
+
+// validateData marshals a command's data payload and validates it against its
+// command-specific schema before it is wrapped in an envelope. A failure is an
+// internal contract violation: the command produced data that does not match its
+// declared schema.
+func validateData(schema *jsonschema.Schema, data any) error {
+	out, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("internal: marshal data: %w", err)
+	}
+	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(out))
+	if err != nil {
+		return fmt.Errorf("internal: parse data: %w", err)
+	}
+	if err := schema.Validate(inst); err != nil {
 		return fmt.Errorf("internal: json output does not conform to schema: %w", err)
 	}
-	fmt.Println(string(out))
 	return nil
 }
 
@@ -658,6 +866,16 @@ type worktreeJSON struct {
 	BaseBranch     string `json:"baseBranch"     toon:"baseBranch"`
 	Exists         bool   `json:"exists"         toon:"exists"`
 	Dirty          bool   `json:"dirty"          toon:"dirty"`
+}
+
+// RenderHuman writes the human-readable form of the worktree data. It is used by
+// the human renderer for open --dry-run and prints at least the planned worktree
+// path, branch, repository root, and base branch.
+func (d worktreeJSON) RenderHuman(w io.Writer) error {
+	_, err := fmt.Fprintf(w,
+		"worktree path:   %s\nbranch:          %s\nrepository root: %s\nbase branch:     %s\n",
+		d.WorktreePath, d.Branch, d.RepositoryRoot, d.BaseBranch)
+	return err
 }
 
 // Validation

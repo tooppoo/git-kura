@@ -91,6 +91,10 @@
           "type": "string",
           "minLength": 1,
           "description": "Human-readable warning message."
+        },
+        "details": {
+          "type": "object",
+          "description": "Command-specific warning details."
         }
       }
     },
