@@ -52,6 +52,7 @@ Commands:
   ls                   List all open worktrees
   seal  <subcommand>   Manage path claims in the repository-wide seal store
   guard <subcommand>   Manage the cooperative guard for the current worktree
+  tools <subcommand>   Install, remove, and inspect auxiliary tool components
 
 Run "git kura <command> --help" for command-specific help.`
 
@@ -198,6 +199,9 @@ func run(args []string) error {
 
 	case "guard":
 		return runGuard(args[1:])
+
+	case "tools":
+		return runTools(args[1:])
 
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
