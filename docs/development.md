@@ -30,7 +30,7 @@ The walkthrough test is a POSIX `sh` script at [`scripts/walkthrough.sh`](../scr
 It favours coverage of the common path over exhaustive variation, and it is independent of the Go unit and integration tests.
 In CI it runs as a separate `walkthrough` job after `make build`.
 
-The script covers opening multiple worktrees, acquiring and releasing the per-worktree guard (including the conflict case), claiming and unclaiming seals across worktrees (including the conflict cases), `seal ls`, `seal test`, `seal doctor` on a healthy and a corrupted store, and the `close` happy path (including that `close` releases the closed worktree's seals).
+The script covers opening multiple worktrees, claiming and unclaiming seals across worktrees (including the conflict cases), `seal ls`, `seal test`, `seal doctor` on a healthy and a corrupted store, and the `close` happy path (including that `close` releases the closed worktree's seals).
 Commands that should succeed are asserted to exit 0, and commands that should fail are asserted to exit non-zero; conflict cases also assert that the stable reason token appears on stderr.
 
 Run it with:
