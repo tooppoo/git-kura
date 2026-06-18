@@ -83,7 +83,7 @@ The `Status` of ADRs 1, 2, 3, and 4 is updated to `Partially superseded by` this
 
 - A reader landing on any of the four prior ADRs is pointed to a single, authoritative statement of what is current.
 - The current seal contract is stated in one place rather than reconstructed from four documents.
-- The distinction between *superseded* (replaced) and *deferred* (still intended, unbuilt) is explicit, so guards and `--staged` are not mistaken for abandoned ideas.
+- The distinction between *superseded* (replaced) and *deferred* (still intended, unbuilt) is explicit, so `--staged` is not mistaken for an abandoned idea. Worktree guards were subsequently implemented and removed; see [20260618T000000Z_remove-worktree-guard.md](20260618T000000Z_remove-worktree-guard.md) for the conditions under which a guard-equivalent feature may be reconsidered.
 
 ### Negative Consequences
 
