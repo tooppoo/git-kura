@@ -17,6 +17,128 @@ func RepoRoot() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// ConfigScopeValue is one value of a config key together with the scope it was
+// read from (system, global, local, worktree, or command).
+type ConfigScopeValue struct {
+	Scope string
+	Value string
+}
+
+// ConfigGetAllWithScope returns every value configured for key together with its
+// scope, in Git's precedence order (lowest precedence first, so the last entry
+// is the effective value). It uses "git config -z --show-scope --get-all" so the
+// scope and value are parsed NUL-safely. An unset key returns an empty slice and
+// a nil error.
+func ConfigGetAllWithScope(repoRoot, key string) ([]ConfigScopeValue, error) {
+	cmd := exec.Command("git", "config", "-z", "--show-scope", "--get-all", key)
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		// `git config --get-all` exits 1 when the key is unset; treat that as no
+		// values rather than an error.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read git config scopes for %q: %w", key, err)
+	}
+	// The -z --show-scope stream is a flat sequence of NUL-terminated fields:
+	// scope, value, scope, value, ... A trailing NUL leaves an empty final field
+	// that must be dropped.
+	fields := strings.Split(string(out), "\x00")
+	if n := len(fields); n > 0 && fields[n-1] == "" {
+		fields = fields[:n-1]
+	}
+	var values []ConfigScopeValue
+	for i := 0; i+1 < len(fields); i += 2 {
+		values = append(values, ConfigScopeValue{Scope: fields[i], Value: fields[i+1]})
+	}
+	return values, nil
+}
+
+// ConfigGetLocal reads a single value from the repository-local config only
+// ("git config --local --get"), ignoring global/system/worktree/command scopes.
+// An unset key returns configured=false with a nil error.
+func ConfigGetLocal(repoRoot, key string) (value string, configured bool, err error) {
+	cmd := exec.Command("git", "config", "--local", "--get", key)
+	cmd.Dir = repoRoot
+	out, runErr := cmd.Output()
+	if runErr == nil {
+		return string(out), true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) && exitErr.ExitCode() == 1 {
+		return "", false, nil
+	}
+	return "", false, fmt.Errorf("read local git config %q: %w", key, runErr)
+}
+
+// SetConfigLocal sets key to value in the repository-local config
+// ("git config --local").
+func SetConfigLocal(repoRoot, key, value string) error {
+	cmd := exec.Command("git", "config", "--local", key, value)
+	cmd.Dir = repoRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("set git config %q: %w\n%s", key, err, out)
+	}
+	return nil
+}
+
+// UnsetConfigLocal removes key from the repository-local config. A key that is
+// already unset is treated as a no-op (git exits 5 in that case).
+func UnsetConfigLocal(repoRoot, key string) error {
+	cmd := exec.Command("git", "config", "--local", "--unset", key)
+	cmd.Dir = repoRoot
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	// `git config --unset` exits 5 when the key (or section) is absent; that is
+	// the desired post-condition, so report success.
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 5 {
+		return nil
+	}
+	return fmt.Errorf("unset git config %q: %w\n%s", key, err, out)
+}
+
+// StagedFiles returns all repository-relative paths affected by staged changes.
+// For renames and copies both the old and new path are included, so a claim on
+// the old path cannot be bypassed by a staged rename.
+func StagedFiles(dir string) ([]string, error) {
+	cmd := exec.Command("git", "diff", "--cached", "--name-status", "--find-renames", "-z")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("read staged files: %w", err)
+	}
+	parts := strings.Split(string(out), "\x00")
+	var paths []string
+	for i := 0; i < len(parts); {
+		token := parts[i]
+		if token == "" {
+			i++
+			continue
+		}
+		// Renames (R<score>) and copies (C<score>) produce two path tokens.
+		if strings.HasPrefix(token, "R") || strings.HasPrefix(token, "C") {
+			if i+1 < len(parts) && parts[i+1] != "" {
+				paths = append(paths, parts[i+1])
+			}
+			if i+2 < len(parts) && parts[i+2] != "" {
+				paths = append(paths, parts[i+2])
+			}
+			i += 3
+		} else {
+			if i+1 < len(parts) && parts[i+1] != "" {
+				paths = append(paths, parts[i+1])
+			}
+			i += 2
+		}
+	}
+	return paths, nil
+}
+
 func HeadBranch(repoRoot string) (string, error) {
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 	cmd.Dir = repoRoot

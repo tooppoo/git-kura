@@ -18,6 +18,14 @@ import (
 	"time"
 )
 
+// sha256hex returns the lowercase hex sha256 digest of data. It is the shared
+// checksum helper used by tools asset verification and the pre-commit
+// component's managed-file integrity checks.
+func sha256hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
 // checksumAlgorithmSHA256 is the only checksum algorithm supported in v0. A
 // sidecar manifest naming any other algorithm makes install fail rather than
 // silently trust an unverifiable archive.

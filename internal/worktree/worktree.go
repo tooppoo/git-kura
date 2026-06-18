@@ -153,6 +153,53 @@ func CurrentKey(currentTop string) (string, error) {
 	return key, nil
 }
 
+// ResolveKeyForWorktreeRoot scans the git-kura managed worktree metadata under
+// stateDir and returns the keys whose recorded worktree path matches
+// worktreeRoot. stateDir is "<git-common-dir>/kura".
+//
+// It returns every matching key (normally zero or one). The pre-commit hook
+// uses this to map the worktree Git is running the hook for back to its key:
+//   - zero matches means the hook is running in an unmanaged worktree (current
+//     key is "none");
+//   - exactly one match is the current key;
+//   - more than one match is an inconsistent metadata state the caller must
+//     treat as fail-closed.
+//
+// An absent metadata directory yields zero matches and a nil error. A metadata
+// file that cannot be read or parsed is skipped rather than failing the whole
+// scan, so one corrupt entry does not hide a valid match.
+func ResolveKeyForWorktreeRoot(stateDir, worktreeRoot string) ([]string, error) {
+	metaDir := filepath.Join(stateDir, "meta", "worktrees")
+	entries, err := os.ReadDir(metaDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read worktree metadata dir: %w", err)
+	}
+	var keys []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(metaDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		if err := validateMetadataJSON(data); err != nil {
+			continue
+		}
+		var meta MetadataFile
+		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+		if samePath(meta.WorktreePath, worktreeRoot) {
+			keys = append(keys, strings.TrimSuffix(entry.Name(), ".json"))
+		}
+	}
+	return keys, nil
+}
+
 // samePath reports whether a and b refer to the same filesystem location,
 // tolerating symlinked path prefixes (e.g. /tmp vs /private/tmp).
 func samePath(a, b string) bool {

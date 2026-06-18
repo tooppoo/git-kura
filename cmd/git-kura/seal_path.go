@@ -551,3 +551,34 @@ func cmdSealTest(rawPaths []string) error {
 	}
 	return nil
 }
+
+// sealKeyNone is the sentinel "current key" used when a seal decision runs in a
+// context that does not map to any managed worktree key — for example the
+// pre-commit hook running in an unmanaged worktree. With this key, a path
+// claimed by any key is a conflict, while unclaimed paths are allowed.
+const sealKeyNone = ""
+
+// evaluateSealedPaths decides which of relPaths conflict with the seal store for
+// currentKey, without touching the store. Each path in relPaths is a
+// repository-relative path (for example a staged path from
+// "git diff --cached --name-only"); it is canonicalized to a store key the same
+// way the store records claims.
+//
+// A path is safe when it is unclaimed or, for a concrete current key, already
+// claimed by that key. When currentKey is sealKeyNone, every claimed path is a
+// conflict. This is the shared path-level decision the pre-commit hook reuses so
+// its judgment matches "git kura seal test".
+func evaluateSealedPaths(store sealPathStore, currentKey string, relPaths []string) []sealConflict {
+	var conflicts []sealConflict
+	for _, rawPath := range relPaths {
+		storeKey := filepath.ToSlash(pathpkg.Clean(rawPath))
+		entry, sealed := store.Paths[storeKey]
+		if !sealed {
+			continue
+		}
+		if currentKey == sealKeyNone || entry.Key != currentKey {
+			conflicts = append(conflicts, sealConflict{path: rawPath, sealedBy: entry.Key})
+		}
+	}
+	return conflicts
+}
