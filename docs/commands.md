@@ -327,5 +327,6 @@ Kura uses stable exit codes so scripts and AI-agent workflows can react correctl
 | 5 | Seal lock timeout |
 | 6 | Seal conflict |
 | 7 | Seal doctor error |
+| 8 | Repository context error |
 
-Exit code 5 is signalled by `seal claim`, `seal unclaim`, `close`, `tools install`, and `tools uninstall`. Exit code 6 is signalled by `seal claim`, `seal unclaim`, and `seal test`. Exit code 7 is signalled by `seal doctor` when the seal store fails integrity validation. The stderr message always starts with a stable reason token (`seal-lock-timeout:` or `tools-metadata-lock-timeout:` for code 5, `seal-conflict:`, or `seal-doctor-error:`) that scripts can match without parsing arbitrary text.
+Exit code 5 is signalled by `seal claim`, `seal unclaim`, `close`, `tools install`, and `tools uninstall`. Exit code 6 is signalled by `seal claim`, `seal unclaim`, and `seal test`. Exit code 7 is signalled by `seal doctor` when the seal store fails integrity validation. Exit code 8 is signalled by `tools` subcommands when they require a git repository context but are run outside one. The stderr message always starts with a stable reason token (`seal-lock-timeout:` or `tools-metadata-lock-timeout:` for code 5, `seal-conflict:`, `seal-doctor-error:`, or `not-in-git-repository:` for code 8) that scripts can match without parsing arbitrary text.

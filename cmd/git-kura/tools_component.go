@@ -76,15 +76,12 @@ func (r *toolsRegistry) ids() []string {
 }
 
 // productionToolsRegistry is the registry exposed to users. It recognizes the
-// three component IDs the framework ships with. The pre-commit component is
-// implemented (#55); the Claude/Codex skill components remain honest
-// placeholders until #56 so their IDs resolve (rather than being usage errors)
-// while reporting that installation is not yet available.
+// three component IDs the framework ships with.
 func productionToolsRegistry() *toolsRegistry {
 	return newToolsRegistry(
 		preCommitComponent{},
-		newPendingComponent("claude-skill", "https://github.com/tooppoo/git-kura/issues/56"),
-		newPendingComponent("codex-skill", "https://github.com/tooppoo/git-kura/issues/56"),
+		newClaudeSkillComponent(),
+		newCodexSkillComponent(),
 	)
 }
 

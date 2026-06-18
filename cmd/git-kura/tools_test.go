@@ -883,13 +883,15 @@ func (s stubTransport) RoundTrip(*http.Request) (*http.Response, error) {
 func TestToolsPendingComponentInstallAndUninstall(t *testing.T) {
 	repo := toolsTestRepo(t)
 	fetcher, _ := fixtureAssets(t, []byte("x\n"))
-	deps := toolsDeps{registry: productionToolsRegistry(), version: fixtureVersion, fetcher: fetcher}
+	// Use a dedicated pending component directly rather than the production
+	// registry, since all production components are now implemented.
+	pending := newPendingComponent("future-tool", "https://github.com/tooppoo/git-kura/issues/999")
+	deps := toolsDeps{registry: newToolsRegistry(pending), version: fixtureVersion, fetcher: fetcher}
 
 	// install of a pending component resolves and verifies the asset, then fails
 	// with a tracking-issue reason; the command exits non-zero and writes no
-	// metadata. pre-commit is implemented (#55), so a still-pending component is
-	// used here.
-	out, err := runToolsCLI(t, repo, deps, "install", "claude-skill")
+	// metadata.
+	out, err := runToolsCLI(t, repo, deps, "install", "future-tool")
 	requireToolsExit(t, err, exitGeneralError)
 	if !strings.Contains(out, "failed") || !strings.Contains(out, "not yet implemented") {
 		t.Fatalf("pending install should fail with a tracking reason:\n%s", out)
@@ -897,7 +899,7 @@ func TestToolsPendingComponentInstallAndUninstall(t *testing.T) {
 	assertPathMissing(t, installedJSONPath(repo))
 
 	// uninstall of a pending component is a not-installed no-op.
-	out, err = runToolsCLI(t, repo, deps, "uninstall", "claude-skill")
+	out, err = runToolsCLI(t, repo, deps, "uninstall", "future-tool")
 	if err != nil {
 		t.Fatalf("pending uninstall: %v", err)
 	}
