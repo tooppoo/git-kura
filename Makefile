@@ -53,5 +53,9 @@ license-check:
 license-save:
 	go tool go-licenses save ./cmd/git-kura --save_path third_party_licenses
 
+.PHONY: tools-archive
+tools-archive:
+	sh scripts/build-tools-archive.sh $(VERSION) dist/tools
+
 .PHONY: check
 check: fmt-check vet coverage vuln license-check
