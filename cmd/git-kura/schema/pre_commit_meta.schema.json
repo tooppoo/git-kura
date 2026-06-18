@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/cmd/git-kura/schema/pre_commit_meta.schema.json",
+  "title": "git kura pre-commit component metadata",
+  "description": "Schema for the componentMetadata blob of the pre-commit tool component, stored in the tools metadata store.",
+  "type": "object",
+  "required": ["installState"],
+  "additionalProperties": false,
+  "properties": {
+    "installState": {
+      "type": "string",
+      "enum": ["pending", "installed"],
+      "description": "Current install state: 'pending' means the config switch has been attempted but not verified; 'installed' means the switch is complete and consistent."
+    },
+    "previousLocalHooksPathState": {
+      "type": "string",
+      "description": "Whether core.hooksPath had a value in repository-local scope before install ('set' or 'unset')."
+    },
+    "previousLocalHooksPathValue": {
+      "type": "string",
+      "description": "The repository-local core.hooksPath value before install. Empty when previousLocalHooksPathState is 'unset'."
+    },
+    "previousHooksPathState": {
+      "type": "string",
+      "description": "Whether core.hooksPath had an effective value (from any scope) before install ('set' or 'unset')."
+    },
+    "previousHooksPathValue": {
+      "type": "string",
+      "description": "The raw effective core.hooksPath value before install. Stored verbatim so a relative value is resolved per-worktree at hook runtime."
+    },
+    "newHooksPathValue": {
+      "type": "string",
+      "description": "The absolute path install wrote to repository-local core.hooksPath."
+    },
+    "managedHooksRoot": {
+      "type": "string",
+      "description": "Root directory of the git-kura managed hook tree. Uninstall removes this whole tree."
+    },
+    "wrapperPath": {
+      "type": "string",
+      "description": "Absolute path to the managed pre-commit wrapper script."
+    },
+    "wrapperChecksum": {
+      "type": "string",
+      "description": "SHA-256 hex checksum of the managed wrapper script content, used to detect external modification."
+    }
+  }
+}

@@ -53,7 +53,7 @@ func readPreCommitMeta(t *testing.T, repo string) (preCommitMeta, bool) {
 }
 
 func managedHooksDir(repo string) string {
-	return filepath.Join(repo, ".git", "kura", "tools", "hooks", "_")
+	return filepath.Join(repo, ".kura", "tools", "hooks", "_")
 }
 
 // --- install ---------------------------------------------------------------
@@ -294,7 +294,7 @@ func TestPreCommitUninstallRestoresUnset(t *testing.T) {
 	if _, ok := gitConfigLocal(t, repo, "core.hooksPath"); ok {
 		t.Fatal("core.hooksPath should be unset after uninstall")
 	}
-	if _, err := os.Stat(filepath.Join(repo, ".git", "kura", "tools", "hooks")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(repo, ".kura", "tools", "hooks")); !os.IsNotExist(err) {
 		t.Fatalf("managed hook tree should be gone: %v", err)
 	}
 	if _, ok := readPreCommitMeta(t, repo); ok {
@@ -373,7 +373,7 @@ func TestPreCommitUninstallCleansUpPendingState(t *testing.T) {
 	if _, ok := gitConfigLocal(t, repo, "core.hooksPath"); ok {
 		t.Fatal("core.hooksPath should be unset after cleaning up a pending install")
 	}
-	if _, err := os.Stat(filepath.Join(commonDir, "kura", "tools", "hooks")); !os.IsNotExist(err) {
+	if _, err := os.Stat(preCommitManagedRoot(commonDir)); !os.IsNotExist(err) {
 		t.Fatalf("managed hook tree should be removed: %v", err)
 	}
 }
@@ -398,7 +398,7 @@ func TestPreCommitUninstallRestoresLocalDespiteHigherPrecedence(t *testing.T) {
 	if v, ok := gitConfigLocal(t, repo, "core.hooksPath"); ok {
 		t.Fatalf("repository-local core.hooksPath should be restored to unset, got %q", v)
 	}
-	if _, err := os.Stat(filepath.Join(repo, ".git", "kura", "tools", "hooks")); !os.IsNotExist(err) {
+	if _, err := os.Stat(preCommitManagedRoot(filepath.Join(repo, ".git"))); !os.IsNotExist(err) {
 		t.Fatalf("managed hook tree should be removed: %v", err)
 	}
 }
@@ -940,7 +940,7 @@ func TestPreCommitInstallFailsWritingWrapper(t *testing.T) {
 	commonDir := filepath.Join(repo, ".git")
 	// Pre-create the managed hooks root as a file so the wrapper directory
 	// cannot be created.
-	hooksRoot := filepath.Join(commonDir, "kura", "tools", "hooks")
+	hooksRoot := preCommitManagedRoot(commonDir)
 	if err := os.MkdirAll(filepath.Dir(hooksRoot), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1175,7 +1175,7 @@ func TestRunPreviousPreCommitRecursionGuard(t *testing.T) {
 
 func TestRollbackPreCommitRestoresConfig(t *testing.T) {
 	repo := toolsTestRepo(t)
-	managedRoot := filepath.Join(repo, ".git", "kura", "tools", "hooks")
+	managedRoot := preCommitManagedRoot(filepath.Join(repo, ".git"))
 	if err := os.MkdirAll(managedRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}

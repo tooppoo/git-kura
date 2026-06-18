@@ -21,7 +21,7 @@ import (
 
 // resolve by goreleaser
 // https://goreleaser.com/resources/cookbooks/using-main.version/
-var version string = "dev"
+var version string = "0.1.0"
 
 //go:embed schema/get_data.schema.json
 var getDataSchemaJSON []byte

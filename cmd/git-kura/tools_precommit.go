@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,9 +12,31 @@ import (
 	"strings"
 	"time"
 
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tooppoo/git-kura/internal/gitutil"
 	"github.com/tooppoo/git-kura/internal/worktree"
 )
+
+//go:embed schema/pre_commit_meta.schema.json
+var preCommitMetaSchemaJSON []byte
+
+var preCommitMetaSchema = mustCompilePreCommitMetaSchema()
+
+func mustCompilePreCommitMetaSchema() *jsonschema.Schema {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(preCommitMetaSchemaJSON))
+	if err != nil {
+		panic(fmt.Sprintf("parse pre-commit meta schema: %v", err))
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("pre_commit_meta.schema.json", doc); err != nil {
+		panic(fmt.Sprintf("add pre-commit meta schema resource: %v", err))
+	}
+	sch, err := c.Compile("pre_commit_meta.schema.json")
+	if err != nil {
+		panic(fmt.Sprintf("compile pre-commit meta schema: %v", err))
+	}
+	return sch
+}
 
 // preCommitComponentID is the registry ID of the pre-commit tool component.
 const preCommitComponentID = "pre-commit"
@@ -80,6 +104,13 @@ func preCommitMetaFromEntry(entry *toolsMetadataEntry) (preCommitMeta, bool) {
 	if err != nil {
 		return preCommitMeta{}, false
 	}
+	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
+	if err != nil {
+		return preCommitMeta{}, false
+	}
+	if err := preCommitMetaSchema.Validate(inst); err != nil {
+		return preCommitMeta{}, false
+	}
 	var m preCommitMeta
 	if err := json.Unmarshal(data, &m); err != nil {
 		return preCommitMeta{}, false
@@ -88,13 +119,15 @@ func preCommitMetaFromEntry(entry *toolsMetadataEntry) (preCommitMeta, bool) {
 }
 
 // preCommitManagedRoot is the directory tree git-kura owns for hook assets,
-// "<git-common-dir>/kura/tools/hooks". Uninstall removes this whole tree.
+// "<repository-root>/.kura/tools/hooks". Uninstall removes this whole tree.
+// Using the repository root (derived from commonDir) keeps hook files in the
+// working tree where they can be tracked in VCS, like Husky.
 func preCommitManagedRoot(commonDir string) string {
-	return filepath.Join(commonDir, "kura", "tools", "hooks")
+	return filepath.Join(filepath.Dir(commonDir), ".kura", "tools", "hooks")
 }
 
 // preCommitHooksDir is the directory core.hooksPath points at,
-// "<git-common-dir>/kura/tools/hooks/_". It holds the managed wrapper.
+// "<repository-root>/.kura/tools/hooks/_". It holds the managed wrapper.
 func preCommitHooksDir(commonDir string) string {
 	return filepath.Join(preCommitManagedRoot(commonDir), "_")
 }
