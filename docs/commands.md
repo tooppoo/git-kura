@@ -285,7 +285,9 @@ createdAt: 2026-06-13T00:00:00Z
 
 `git kura tools` installs, removes, and inspects *tool components*: self-contained helpers — such as a pre-commit hook or an editor skill — that git-kura installs into the repository from a verified release asset and can later remove.
 
-The framework recognizes three component IDs: `pre-commit`, `claude-skill`, and `codex-skill`. Each component's concrete install behavior is delivered in follow-up work; until then the IDs are recognized so they are not usage errors, while `install` reports that installation is not yet implemented and `status` / `uninstall` report `not-installed`.
+The framework recognizes three component IDs: `pre-commit`, `claude-skill`, and `codex-skill`. `claude-skill` and `codex-skill` are not yet implemented: `install` reports that installation is not yet implemented and `status` / `uninstall` report `not-installed`. `pre-commit` is fully implemented.
+
+`git kura tools install pre-commit` installs a thin wrapper script and points `core.hooksPath` at the managed hooks directory using the repository-local config scope only. At commit time the hook runs the same path-level seal check as `git kura seal test` against the staged files, chains any previously configured pre-commit hook, and re-checks the staged files after the previous hook finishes. The commit is rejected when any check fails. This is a local safety guard only; `git commit --no-verify` bypasses it entirely. If a higher-precedence `core.hooksPath` (`worktree` or `command` scope) would shadow the local setting, `install` fails before changing anything. `git kura tools uninstall pre-commit` restores `core.hooksPath` to its prior state.
 
 An unknown component is a usage error (exit code 2). `install` and `uninstall` require at least one component or `--all`, and `--all` may not be combined with explicit component names; both violations are usage errors. `status` does not accept `--all`: run it with no component to show every component.
 

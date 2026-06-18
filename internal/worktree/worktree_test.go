@@ -197,6 +197,76 @@ func TestCurrentKey(t *testing.T) {
 	})
 }
 
+func TestResolveKeyForWorktreeRoot(t *testing.T) {
+	repo := initRepoWithCommit(t)
+	stateDir := filepath.Join(repo, ".git", "kura")
+
+	// No metadata directory yet → zero matches, no error.
+	if keys, err := worktree.ResolveKeyForWorktreeRoot(stateDir, repo); err != nil || len(keys) != 0 {
+		t.Fatalf("empty: keys=%v err=%v, want none", keys, err)
+	}
+
+	wtTop := addManagedWorktree(t, repo, "51")
+
+	t.Run("exactly one match", func(t *testing.T) {
+		keys, err := worktree.ResolveKeyForWorktreeRoot(stateDir, wtTop)
+		if err != nil {
+			t.Fatalf("ResolveKeyForWorktreeRoot: %v", err)
+		}
+		if len(keys) != 1 || keys[0] != "51" {
+			t.Fatalf("keys = %v, want [51]", keys)
+		}
+	})
+
+	t.Run("no match for an unmanaged worktree root", func(t *testing.T) {
+		keys, err := worktree.ResolveKeyForWorktreeRoot(stateDir, repo)
+		if err != nil || len(keys) != 0 {
+			t.Fatalf("keys=%v err=%v, want none", keys, err)
+		}
+	})
+
+	t.Run("ambiguous metadata yields multiple matches", func(t *testing.T) {
+		dupe := filepath.Join(stateDir, "meta", "worktrees", "dupe.json")
+		writeFile(t, dupe, `{"repositoryRoot":"`+repo+`","baseBranch":"main","worktreePath":"`+wtTop+`"}`)
+		keys, err := worktree.ResolveKeyForWorktreeRoot(stateDir, wtTop)
+		if err != nil {
+			t.Fatalf("ResolveKeyForWorktreeRoot: %v", err)
+		}
+		if len(keys) != 2 {
+			t.Fatalf("keys = %v, want two matches", keys)
+		}
+	})
+
+	t.Run("corrupt metadata file is skipped", func(t *testing.T) {
+		bad := filepath.Join(stateDir, "meta", "worktrees", "bad.json")
+		writeFile(t, bad, `{not json`)
+		keys, err := worktree.ResolveKeyForWorktreeRoot(stateDir, wtTop)
+		if err != nil {
+			t.Fatalf("corrupt entry must not fail the scan: %v", err)
+		}
+		if len(keys) < 1 {
+			t.Fatalf("valid matches must still be found, got %v", keys)
+		}
+	})
+}
+
+func TestResolveKeyForWorktreeRootReadDirError(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "kura")
+	// Create the metadata path as a regular file so ReadDir fails with a
+	// non-"not exist" error.
+	metaParent := filepath.Join(stateDir, "meta")
+	if err := os.MkdirAll(metaParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(metaParent, "worktrees"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worktree.ResolveKeyForWorktreeRoot(stateDir, dir); err == nil {
+		t.Fatal("ResolveKeyForWorktreeRoot should error when the metadata dir is unreadable")
+	}
+}
+
 func TestCurrentKeyMissingMetadata(t *testing.T) {
 	repo := initRepoWithCommit(t)
 	wtTop := addManagedWorktree(t, repo, "51")

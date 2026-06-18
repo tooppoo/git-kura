@@ -4,8 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -30,11 +28,6 @@ func toolsTestRepo(t *testing.T) string {
 	git(t, repo, "config", "user.email", "kura-test@example.com")
 	git(t, repo, "config", "user.name", "Kura Test")
 	return repo
-}
-
-func sha256hex(data []byte) string {
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
 }
 
 // runToolsCLI runs runToolsWith from inside repo, capturing stdout and the
@@ -894,8 +887,9 @@ func TestToolsPendingComponentInstallAndUninstall(t *testing.T) {
 
 	// install of a pending component resolves and verifies the asset, then fails
 	// with a tracking-issue reason; the command exits non-zero and writes no
-	// metadata.
-	out, err := runToolsCLI(t, repo, deps, "install", "pre-commit")
+	// metadata. pre-commit is implemented (#55), so a still-pending component is
+	// used here.
+	out, err := runToolsCLI(t, repo, deps, "install", "claude-skill")
 	requireToolsExit(t, err, exitGeneralError)
 	if !strings.Contains(out, "failed") || !strings.Contains(out, "not yet implemented") {
 		t.Fatalf("pending install should fail with a tracking reason:\n%s", out)

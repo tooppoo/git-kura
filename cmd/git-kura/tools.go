@@ -137,6 +137,11 @@ func runToolsWith(deps toolsDeps, args []string) error {
 			return err
 		}
 		return cmdToolsUninstall(deps, targets)
+	case "run":
+		// Internal command invoked by managed hook wrappers (e.g. the pre-commit
+		// wrapper). It resolves its own Git/seal context and does not use the
+		// component registry or release assets.
+		return runToolsRun(args[1:])
 	default:
 		return usageError(fmt.Errorf("unknown tools subcommand: %s", args[0]))
 	}

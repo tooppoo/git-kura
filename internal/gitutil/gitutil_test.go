@@ -239,6 +239,128 @@ func TestConfigValue(t *testing.T) {
 	})
 }
 
+func TestConfigLocalSetGetUnset(t *testing.T) {
+	repo := initRepo(t)
+
+	if _, ok, err := gitutil.ConfigGetLocal(repo, "core.hooksPath"); err != nil || ok {
+		t.Fatalf("unset local key: ok=%v err=%v, want false/nil", ok, err)
+	}
+	if err := gitutil.SetConfigLocal(repo, "core.hooksPath", "/abs/hooks"); err != nil {
+		t.Fatalf("SetConfigLocal: %v", err)
+	}
+	v, ok, err := gitutil.ConfigGetLocal(repo, "core.hooksPath")
+	if err != nil || !ok || strings.TrimRight(v, "\n") != "/abs/hooks" {
+		t.Fatalf("ConfigGetLocal = %q/%v/%v, want /abs/hooks", v, ok, err)
+	}
+	// Unsetting twice is a no-op the second time.
+	if err := gitutil.UnsetConfigLocal(repo, "core.hooksPath"); err != nil {
+		t.Fatalf("UnsetConfigLocal: %v", err)
+	}
+	if err := gitutil.UnsetConfigLocal(repo, "core.hooksPath"); err != nil {
+		t.Fatalf("UnsetConfigLocal idempotent: %v", err)
+	}
+	if _, ok, _ := gitutil.ConfigGetLocal(repo, "core.hooksPath"); ok {
+		t.Fatal("core.hooksPath should be unset")
+	}
+}
+
+func TestConfigGetLocalExecutionError(t *testing.T) {
+	// Pointing at a non-existent working directory makes git fail to start,
+	// which must surface as a real error rather than an unset key.
+	repo := initRepo(t)
+	if _, configured, err := gitutil.ConfigGetLocal(filepath.Join(repo, "missing"), "core.hooksPath"); err == nil || configured {
+		t.Fatalf("ConfigGetLocal should error when git cannot run; configured=%v err=%v", configured, err)
+	}
+}
+
+func TestConfigGetAllWithScopeExecutionError(t *testing.T) {
+	repo := initRepo(t)
+	if _, err := gitutil.ConfigGetAllWithScope(filepath.Join(repo, "missing"), "core.hooksPath"); err == nil {
+		t.Fatal("ConfigGetAllWithScope should error when git cannot run")
+	}
+}
+
+func TestConfigGetAllWithScope(t *testing.T) {
+	repo := initRepo(t)
+
+	if vals, err := gitutil.ConfigGetAllWithScope(repo, "core.hooksPath"); err != nil || len(vals) != 0 {
+		t.Fatalf("unset: vals=%v err=%v, want empty/nil", vals, err)
+	}
+
+	gitCmd(t, repo, "config", "--local", "core.hooksPath", "/local/hooks")
+	vals, err := gitutil.ConfigGetAllWithScope(repo, "core.hooksPath")
+	if err != nil {
+		t.Fatalf("ConfigGetAllWithScope: %v", err)
+	}
+	if len(vals) != 1 || vals[0].Scope != "local" || vals[0].Value != "/local/hooks" {
+		t.Fatalf("got %+v, want one local /local/hooks", vals)
+	}
+
+	// A worktree-scoped value is reported with higher precedence (later).
+	gitCmd(t, repo, "config", "--local", "extensions.worktreeConfig", "true")
+	gitCmd(t, repo, "config", "--worktree", "core.hooksPath", "/wt/hooks")
+	vals, err = gitutil.ConfigGetAllWithScope(repo, "core.hooksPath")
+	if err != nil {
+		t.Fatalf("ConfigGetAllWithScope worktree: %v", err)
+	}
+	var sawWorktree bool
+	for _, v := range vals {
+		if v.Scope == "worktree" && v.Value == "/wt/hooks" {
+			sawWorktree = true
+		}
+	}
+	if !sawWorktree {
+		t.Fatalf("expected a worktree-scoped value, got %+v", vals)
+	}
+}
+
+func TestStagedFiles(t *testing.T) {
+	repo := initRepo(t)
+
+	if files, err := gitutil.StagedFiles(repo); err != nil || len(files) != 0 {
+		t.Fatalf("clean index: files=%v err=%v, want empty/nil", files, err)
+	}
+
+	// Stage paths including one with a space to exercise NUL-safe parsing.
+	for _, name := range []string{"a.txt", "with space.txt"} {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitCmd(t, repo, "add", name)
+	}
+	files, err := gitutil.StagedFiles(repo)
+	if err != nil {
+		t.Fatalf("StagedFiles: %v", err)
+	}
+	got := strings.Join(files, "|")
+	if !strings.Contains(got, "a.txt") || !strings.Contains(got, "with space.txt") {
+		t.Fatalf("StagedFiles = %v, want both staged paths", files)
+	}
+
+	if _, err := gitutil.StagedFiles(filepath.Join(repo, "nope")); err == nil {
+		t.Fatal("StagedFiles in non-repo should error")
+	}
+}
+
+func TestStagedFilesRename(t *testing.T) {
+	repo := initRepo(t) // has tracked.txt committed
+
+	// Stage a rename: tracked.txt → renamed.txt
+	gitCmd(t, repo, "mv", "tracked.txt", "renamed.txt")
+
+	files, err := gitutil.StagedFiles(repo)
+	if err != nil {
+		t.Fatalf("StagedFiles: %v", err)
+	}
+	got := strings.Join(files, "|")
+	if !strings.Contains(got, "tracked.txt") {
+		t.Errorf("StagedFiles = %v, want old rename path tracked.txt", files)
+	}
+	if !strings.Contains(got, "renamed.txt") {
+		t.Errorf("StagedFiles = %v, want new rename path renamed.txt", files)
+	}
+}
+
 func initRepo(t *testing.T) string {
 	t.Helper()
 
