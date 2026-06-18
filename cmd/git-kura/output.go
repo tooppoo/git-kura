@@ -56,23 +56,20 @@ func mustCompileEnvelopeSchema() *jsonschema.Schema {
 
 // Command is the canonical identifier for a command execution in structured
 // output. It is dot-separated so subcommands stay grouped under their command
-// (for example "seal.claim" and "guard.acquire"). The schema's command enum
-// must list exactly the values in allCommands.
+// (for example "seal.claim"). The schema's command enum must list exactly the
+// values in allCommands.
 type Command string
 
 const (
-	commandGet          Command = "get"
-	commandOpen         Command = "open"
-	commandClose        Command = "close"
-	commandLs           Command = "ls"
-	commandSealClaim    Command = "seal.claim"
-	commandSealUnclaim  Command = "seal.unclaim"
-	commandSealTest     Command = "seal.test"
-	commandSealLs       Command = "seal.ls"
-	commandSealDoctor   Command = "seal.doctor"
-	commandGuardAcquire Command = "guard.acquire"
-	commandGuardRelease Command = "guard.release"
-	commandGuardStatus  Command = "guard.status"
+	commandGet         Command = "get"
+	commandOpen        Command = "open"
+	commandClose       Command = "close"
+	commandLs          Command = "ls"
+	commandSealClaim   Command = "seal.claim"
+	commandSealUnclaim Command = "seal.unclaim"
+	commandSealTest    Command = "seal.test"
+	commandSealLs      Command = "seal.ls"
+	commandSealDoctor  Command = "seal.doctor"
 )
 
 // allCommands is the canonical set of command identifiers. It is the source of
@@ -88,9 +85,6 @@ var allCommands = []Command{
 	commandSealTest,
 	commandSealLs,
 	commandSealDoctor,
-	commandGuardAcquire,
-	commandGuardRelease,
-	commandGuardStatus,
 }
 
 // Warning is a non-fatal diagnostic attached to a command execution. Warnings

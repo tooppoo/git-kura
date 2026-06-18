@@ -51,29 +51,7 @@ main() {
 	ALPHA="$(cd "$REPO" && git kura get alpha)"
 	BETA="$(cd "$REPO" && git kura get beta)"
 
-	#-- 4. guard acquire / release --------------------------------------
-
-	step "guard acquire is exclusive per worktree"
-	gk "$ALPHA" guard acquire
-	expect_rc 0 "alpha acquires its guard"
-	gk "$BETA" guard acquire
-	expect_rc 0 "beta acquires its own guard independently"
-
-	gk "$ALPHA" guard acquire
-	expect_rc 8 "re-acquiring alpha's guard conflicts"
-	expect_stderr_contains "guard-active" "guard conflict carries the guard-active token"
-
-	gk "$ALPHA" guard release
-	expect_rc 0 "alpha releases its guard"
-	gk "$ALPHA" guard acquire
-	expect_rc 0 "alpha can re-acquire its guard after release"
-
-	gk "$ALPHA" guard release
-	expect_rc 0 "alpha releases its guard again"
-	gk "$BETA" guard release
-	expect_rc 0 "beta releases its guard"
-
-	#-- 5. seal claim ---------------------------------------------------
+	#-- 4. seal claim ---------------------------------------------------
 
 	step "seal claim succeeds without conflict"
 	gk "$ALPHA" seal claim file1.txt file2.txt
@@ -88,14 +66,14 @@ main() {
 	gk "$BETA" seal claim file3.txt
 	expect_rc 0 "beta claims the unclaimed file3.txt"
 
-	#-- 6. seal ls ------------------------------------------------------
+	#-- 5. seal ls ------------------------------------------------------
 
 	step "seal ls reflects current claims"
 	seal_present alpha file1.txt "seal ls lists alpha file1.txt"
 	seal_present alpha file2.txt "seal ls lists alpha file2.txt"
 	seal_present beta file3.txt "seal ls lists beta file3.txt"
 
-	#-- 7. seal test ----------------------------------------------------
+	#-- 6. seal test ----------------------------------------------------
 
 	step "seal test detects conflicts and clean paths"
 	gk "$BETA" seal test file1.txt
@@ -108,7 +86,7 @@ main() {
 	gk "$BETA" seal test file4.txt
 	expect_rc 0 "seal test passes for an unclaimed file"
 
-	#-- 8. seal unclaim -------------------------------------------------
+	#-- 7. seal unclaim -------------------------------------------------
 
 	step "seal unclaim frees a path for another worktree"
 	gk "$ALPHA" seal unclaim file1.txt
@@ -121,7 +99,7 @@ main() {
 	expect_rc 6 "beta still cannot claim file2.txt, which alpha did not unclaim"
 	expect_stderr_contains "seal-conflict" "still-claimed file2.txt reports the conflict token"
 
-	#-- 9. seal doctor --------------------------------------------------
+	#-- 8. seal doctor --------------------------------------------------
 
 	step "seal doctor validates a healthy store"
 	gk "$REPO" seal doctor
@@ -136,7 +114,7 @@ main() {
 	expect_stderr_contains "seal-doctor-error" "doctor reports the seal-doctor-error token"
 	mv "$STORE.bak" "$STORE"
 
-	#-- 10. close (happy path only) -------------------------------------
+	#-- 9. close (happy path only) -------------------------------------
 
 	step "close: open and claim a throwaway worktree"
 	gk "$REPO" open gamma

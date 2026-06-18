@@ -383,7 +383,6 @@ func TestReasonForExitCode(t *testing.T) {
 		exitSealLockTimeout: "seal-lock-timeout",
 		exitSealConflict:    "seal-conflict",
 		exitSealDoctorError: "seal-doctor-error",
-		exitGuardConflict:   "guard-conflict",
 		exitGeneralError:    "general-error",
 		9999:                "general-error",
 	}
@@ -931,7 +930,7 @@ func TestExitCodeValuesMatchDocs(t *testing.T) {
 	if exitSuccess != 0 || exitGeneralError != 1 || exitUsageError != 2 ||
 		exitUnsafeRefused != 3 || exitNotFound != 4 ||
 		exitSealLockTimeout != 5 || exitSealConflict != 6 ||
-		exitSealDoctorError != 7 || exitGuardConflict != 8 {
+		exitSealDoctorError != 7 {
 		t.Fatal("exit code constants must match the table in docs/commands.md")
 	}
 }

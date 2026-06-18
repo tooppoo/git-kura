@@ -26,18 +26,7 @@ git merge fizz-feature                 # merge changes to main stream
 git kura close fizz-feature            # clean up worktree and branch
 ```
 
-When multiple AI coding agents may share a worktree, acquire a cooperative guard at the start of work and release it at the end:
-
-```sh
-cd $(git kura get fizz-feature)        # move to the worktree
-git kura guard acquire                 # claim the worktree before working in it
-
-# edit, save and commit in the worktree
-
-git kura guard release                 # release the worktree when done
-```
-
-`git kura guard acquire` exits with code 8 (`guard-active:`) when another agent already holds the worktree. See [docs/commands.md](docs/commands.md#guard-commands) for the full guard and seal command reference.
+See [docs/commands.md](docs/commands.md) for the full command reference.
 
 ## Quick Start
 

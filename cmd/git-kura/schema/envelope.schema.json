@@ -28,10 +28,7 @@
         "seal.unclaim",
         "seal.test",
         "seal.ls",
-        "seal.doctor",
-        "guard.acquire",
-        "guard.release",
-        "guard.status"
+        "seal.doctor"
       ]
     },
     "schemaVersion": {

@@ -67,10 +67,11 @@ The following clauses are superseded and **must not** be read as current design:
 Some clauses of ADRs 3 and 4 remain the intended future design and are **not** superseded — they are simply not implemented yet:
 
 - `seal test --staged` (the commit-time staged-file safety net). `seal test` currently rejects `--all` / `--unsealed` / `--staged` rather than silently ignoring them, leaving room to add `--staged` later.
-- Worktree guards (`guard acquire` / `guard release` / `guard status`).
 - `seal doctor` (the repository-wide seal-store integrity check, ADR 4). It was specified but never implemented. Unlike `seal session ls` / `seal session clean`, it was not part of the session-local model, so it is deferred rather than superseded.
 
 When these are implemented, they should follow ADRs 3 and 4, and the implementation map should be extended accordingly.
+
+> **Worktree guards (`guard acquire` / `guard release` / `guard status`) are no longer deferred future design.** They were implemented and subsequently removed in [20260618T000000Z_remove-worktree-guard.md](20260618T000000Z_remove-worktree-guard.md). The guard section of ADR 3 is superseded by that ADR. A guard-equivalent feature may be reconsidered only when the stale-guard detection and unit-level concept conditions defined in the removal ADR are both satisfied.
 
 ### 5. Status updates to prior ADRs
 
@@ -82,7 +83,7 @@ The `Status` of ADRs 1, 2, 3, and 4 is updated to `Partially superseded by` this
 
 - A reader landing on any of the four prior ADRs is pointed to a single, authoritative statement of what is current.
 - The current seal contract is stated in one place rather than reconstructed from four documents.
-- The distinction between *superseded* (replaced) and *deferred* (still intended, unbuilt) is explicit, so guards and `--staged` are not mistaken for abandoned ideas.
+- The distinction between *superseded* (replaced) and *deferred* (still intended, unbuilt) is explicit, so `--staged` is not mistaken for an abandoned idea. Worktree guards were subsequently implemented and removed; see [20260618T000000Z_remove-worktree-guard.md](20260618T000000Z_remove-worktree-guard.md) for the conditions under which a guard-equivalent feature may be reconsidered.
 
 ### Negative Consequences
 
