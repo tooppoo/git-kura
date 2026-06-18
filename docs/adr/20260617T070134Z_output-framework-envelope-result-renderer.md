@@ -62,7 +62,7 @@ Failure example:
 
 ### Canonical command identifiers
 
-The `command` field must use a canonical, dot-separated identifier so subcommands stay grouped under their command, for example `get`, `open`, `seal.claim`, and `guard.acquire`.
+The `command` field must use a canonical, dot-separated identifier so subcommands stay grouped under their command, for example `get`, `open`, and `seal.claim`.
 The Go constants in `allCommands` are the source of truth, and the schema's `command` enum must list exactly those values; a test cross-checks the two so they cannot drift.
 
 ### Result, error, and warning intermediate representations

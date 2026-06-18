@@ -67,10 +67,11 @@ The following clauses are superseded and **must not** be read as current design:
 Some clauses of ADRs 3 and 4 remain the intended future design and are **not** superseded — they are simply not implemented yet:
 
 - `seal test --staged` (the commit-time staged-file safety net). `seal test` currently rejects `--all` / `--unsealed` / `--staged` rather than silently ignoring them, leaving room to add `--staged` later.
-- Worktree guards (`guard acquire` / `guard release` / `guard status`).
 - `seal doctor` (the repository-wide seal-store integrity check, ADR 4). It was specified but never implemented. Unlike `seal session ls` / `seal session clean`, it was not part of the session-local model, so it is deferred rather than superseded.
 
 When these are implemented, they should follow ADRs 3 and 4, and the implementation map should be extended accordingly.
+
+> **Worktree guards (`guard acquire` / `guard release` / `guard status`) are no longer deferred future design.** They were implemented and subsequently removed in [20260618T000000Z_remove-worktree-guard.md](20260618T000000Z_remove-worktree-guard.md). The guard section of ADR 3 is superseded by that ADR. A guard-equivalent feature may be reconsidered only when the stale-guard detection and unit-level concept conditions defined in the removal ADR are both satisfied.
 
 ### 5. Status updates to prior ADRs
 
