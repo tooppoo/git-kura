@@ -1801,3 +1801,110 @@ func TestRunSealTestHelpInProcess(t *testing.T) {
 		}
 	})
 }
+
+// --- parseLsArgs unit tests ---
+
+func TestParseLsArgsNoFlags(t *testing.T) {
+	opts, err := parseLsArgs([]string{})
+	if err != nil {
+		t.Fatalf("parseLsArgs([]) error = %v, want nil", err)
+	}
+	if opts.JSON {
+		t.Fatal("JSON = true, want false")
+	}
+}
+
+func TestParseLsArgsJSON(t *testing.T) {
+	opts, err := parseLsArgs([]string{"--json"})
+	if err != nil {
+		t.Fatalf("parseLsArgs([--json]) error = %v, want nil", err)
+	}
+	if !opts.JSON {
+		t.Fatal("JSON = false, want true")
+	}
+}
+
+func TestParseLsArgsUnknownFlagIsError(t *testing.T) {
+	for _, args := range [][]string{
+		{"--format"},
+		{"--all"},
+		{"unexpected"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			if _, err := parseLsArgs(args); err == nil {
+				t.Fatalf("parseLsArgs(%v) error = nil, want error", args)
+			}
+		})
+	}
+}
+
+// --- parseSealLsArgs unit tests ---
+
+func TestParseSealLsArgsNoArgs(t *testing.T) {
+	opts, err := parseSealLsArgs([]string{})
+	if err != nil {
+		t.Fatalf("parseSealLsArgs([]) error = %v, want nil", err)
+	}
+	if opts.JSON || opts.FilterKey != "" {
+		t.Fatalf("opts = %+v, want zero", opts)
+	}
+}
+
+func TestParseSealLsArgsKeyOnly(t *testing.T) {
+	opts, err := parseSealLsArgs([]string{"key1"})
+	if err != nil {
+		t.Fatalf("parseSealLsArgs([key1]) error = %v, want nil", err)
+	}
+	if opts.FilterKey != "key1" || opts.JSON {
+		t.Fatalf("opts = %+v, want FilterKey=key1 JSON=false", opts)
+	}
+}
+
+func TestParseSealLsArgsJSONOnly(t *testing.T) {
+	opts, err := parseSealLsArgs([]string{"--json"})
+	if err != nil {
+		t.Fatalf("parseSealLsArgs([--json]) error = %v, want nil", err)
+	}
+	if !opts.JSON || opts.FilterKey != "" {
+		t.Fatalf("opts = %+v, want JSON=true FilterKey=''", opts)
+	}
+}
+
+func TestParseSealLsArgsJSONThenKey(t *testing.T) {
+	opts, err := parseSealLsArgs([]string{"--json", "key1"})
+	if err != nil {
+		t.Fatalf("parseSealLsArgs([--json key1]) error = %v, want nil", err)
+	}
+	if !opts.JSON || opts.FilterKey != "key1" {
+		t.Fatalf("opts = %+v, want JSON=true FilterKey=key1", opts)
+	}
+}
+
+func TestParseSealLsArgsKeyBeforeJSONIsUsageError(t *testing.T) {
+	_, err := parseSealLsArgs([]string{"key1", "--json"})
+	if err == nil {
+		t.Fatal("parseSealLsArgs([key1 --json]) error = nil, want usage error")
+	}
+	var xe *exitError
+	if !errors.As(err, &xe) || xe.code != exitUsageError {
+		t.Fatalf("expected exitUsageError, got: %v", err)
+	}
+}
+
+func TestParseSealLsArgsUnknownOptionIsUsageError(t *testing.T) {
+	for _, args := range [][]string{
+		{"--all"},
+		{"--key", "key1"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			_, err := parseSealLsArgs(args)
+			if err == nil {
+				t.Fatalf("parseSealLsArgs(%v) error = nil, want error", args)
+			}
+			var xe *exitError
+			if !errors.As(err, &xe) || xe.code != exitUsageError {
+				t.Fatalf("expected exitUsageError, got: %v", err)
+			}
+		})
+	}
+}

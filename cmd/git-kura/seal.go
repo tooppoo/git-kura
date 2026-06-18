@@ -1,13 +1,63 @@
 package main
 
 import (
+	"bytes"
+	_ "embed"
 	"fmt"
-	"os"
+	"io"
 	"sort"
 	"strings"
 
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tooppoo/git-kura/internal/gitutil"
 )
+
+//go:embed schema/commands/seal_ls.schema.json
+var sealLsDataSchemaJSON []byte
+
+var sealLsDataSchema = mustCompileSealLsDataSchema()
+
+func mustCompileSealLsDataSchema() *jsonschema.Schema {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(sealLsDataSchemaJSON))
+	if err != nil {
+		panic(fmt.Sprintf("parse seal_ls data schema: %v", err))
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("seal_ls.schema.json", doc); err != nil {
+		panic(fmt.Sprintf("add seal_ls data schema resource: %v", err))
+	}
+	sch, err := c.Compile("seal_ls.schema.json")
+	if err != nil {
+		panic(fmt.Sprintf("compile seal_ls data schema: %v", err))
+	}
+	return sch
+}
+
+type sealLsOptions struct {
+	FilterKey string
+	JSON      bool
+}
+
+// sealLsClaim is one entry in the seal ls JSON output.
+type sealLsClaim struct {
+	Key  string `json:"key"`
+	Path string `json:"path"`
+}
+
+// sealLsData is the structured success payload for seal ls --json.
+type sealLsData struct {
+	FilterKey *string       `json:"filterKey"`
+	Claims    []sealLsClaim `json:"claims"`
+}
+
+func (d sealLsData) RenderHuman(w io.Writer) error {
+	for _, c := range d.Claims {
+		if _, err := fmt.Fprintf(w, "%s\t%s\n", c.Key, c.Path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 const sealHelp = `Usage: git kura seal <subcommand> [args]
 
@@ -26,7 +76,7 @@ Subcommands:
 
 Run "git kura seal <subcommand> --help" for subcommand-specific help.`
 
-const sealLsHelp = `Usage: git kura seal ls [key]
+const sealLsHelp = `Usage: git kura seal ls [--json] [key]
 
 List claimed paths recorded in the seal store.
 
@@ -43,7 +93,11 @@ Output is one line per claimed path:
   <key>	<path>
 
 Paths are repository-root relative with "/" separators. Lines are sorted
-by key, then by path. An empty store produces no output and exits 0.`
+by key, then by path. An empty store produces no output and exits 0.
+
+Flags:
+  --json   Print structured output as a JSON envelope. --json must appear
+           before the optional key argument.`
 
 const sealClaimHelp = `Usage: git kura seal claim <path> [path...]
 
@@ -139,11 +193,11 @@ func runSeal(args []string) error {
 			fmt.Println(sealLsHelp)
 			return nil
 		}
-		key, err := parseSealLsArgs(args[1:])
+		opts, err := parseSealLsArgs(args[1:])
 		if err != nil {
 			return err
 		}
-		return cmdSealLs(key)
+		return cmdSealLs(opts)
 	case "claim":
 		return runSealClaim(args[1:])
 	case "unclaim":
@@ -231,66 +285,110 @@ func parseSealDoctorArgs(args []string) error {
 	return exitCodeError(exitUsageError, fmt.Errorf("usage: git kura seal doctor: unexpected argument %q", args[0]))
 }
 
-// parseSealLsArgs accepts at most one positional key argument. Options are
-// rejected: ls is intentionally option-free in v0 so that future flags such
-// as --format can be added without ambiguity.
-func parseSealLsArgs(args []string) (string, error) {
+// parseSealLsArgs parses the argument list for seal ls. --json must appear
+// before the optional key argument; "seal ls <key> --json" is a usage error
+// and is not treated as a valid JSON request so no ok:false envelope is emitted.
+func parseSealLsArgs(args []string) (sealLsOptions, error) {
+	var opts sealLsOptions
+
 	if len(args) == 0 {
-		return "", nil
+		return opts, nil
 	}
+
+	if args[0] == "--json" {
+		opts.JSON = true
+		args = args[1:]
+	} else if strings.HasPrefix(args[0], "-") {
+		return sealLsOptions{}, exitCodeError(exitUsageError,
+			fmt.Errorf("usage: git kura seal ls [--json] [key]: unknown option %q", args[0]))
+	}
+
+	if len(args) == 0 {
+		return opts, nil
+	}
+
 	if strings.HasPrefix(args[0], "-") {
-		return "", fmt.Errorf("usage: git kura seal ls [key]: unknown option %q", args[0])
+		return sealLsOptions{}, exitCodeError(exitUsageError,
+			fmt.Errorf("usage: git kura seal ls [--json] [key]: unknown option %q", args[0]))
 	}
-	if len(args) > 1 {
-		return "", fmt.Errorf("usage: git kura seal ls [key]: unexpected argument %q", args[1])
-	}
+
 	if err := validateKey(args[0]); err != nil {
-		return "", err
+		return sealLsOptions{}, err
 	}
-	return args[0], nil
+	opts.FilterKey = args[0]
+	args = args[1:]
+
+	if len(args) > 0 {
+		return sealLsOptions{}, exitCodeError(exitUsageError,
+			fmt.Errorf("usage: git kura seal ls [--json] [key]: unexpected argument %q (--json must appear before the key)", args[0]))
+	}
+
+	return opts, nil
 }
 
-// cmdSealLs lists claimed paths from the path seal store as "<key>\t<path>"
-// lines, sorted by key then path. An empty filterKey lists every key.
-// Per docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md,
+// cmdSealLs lists claimed paths from the path seal store. An empty
+// opts.FilterKey lists every key. Per
+// docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md,
 // ls is always repository-wide: its scope must not depend on the caller's
 // current worktree. It also reads the store without acquiring paths.lock,
 // so a held lock never blocks listing.
-func cmdSealLs(filterKey string) error {
+func cmdSealLs(opts sealLsOptions) error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
-		return fmt.Errorf("not inside a git repository")
+		return sealLsFail(opts, fmt.Errorf("not inside a git repository"))
 	}
 	storeFile, _, err := pathsSealStore(repoRoot)
 	if err != nil {
-		return err
+		return sealLsFail(opts, err)
 	}
 	store, err := readSealStore(storeFile)
 	if err != nil {
-		return err
+		return sealLsFail(opts, err)
 	}
 
-	paths := make([]string, 0, len(store.Paths))
+	rawPaths := make([]string, 0, len(store.Paths))
 	for p, entry := range store.Paths {
-		if filterKey != "" && entry.Key != filterKey {
+		if opts.FilterKey != "" && entry.Key != opts.FilterKey {
 			continue
 		}
-		paths = append(paths, p)
+		rawPaths = append(rawPaths, p)
 	}
-	sort.Slice(paths, func(i, j int) bool {
-		ki, kj := store.Paths[paths[i]].Key, store.Paths[paths[j]].Key
+	sort.Slice(rawPaths, func(i, j int) bool {
+		ki, kj := store.Paths[rawPaths[i]].Key, store.Paths[rawPaths[j]].Key
 		if ki != kj {
 			return ki < kj
 		}
-		return paths[i] < paths[j]
+		return rawPaths[i] < rawPaths[j]
 	})
 
-	var b strings.Builder
-	for _, p := range paths {
-		fmt.Fprintf(&b, "%s\t%s\n", store.Paths[p].Key, p)
+	claims := make([]sealLsClaim, len(rawPaths))
+	for i, p := range rawPaths {
+		claims[i] = sealLsClaim{Key: store.Paths[p].Key, Path: p}
 	}
-	_, err = os.Stdout.WriteString(b.String())
-	return err
+
+	var filterKey *string
+	if opts.FilterKey != "" {
+		k := opts.FilterKey
+		filterKey = &k
+	}
+	data := sealLsData{FilterKey: filterKey, Claims: claims}
+
+	if opts.JSON {
+		if err := validateData(sealLsDataSchema, data); err != nil {
+			return err
+		}
+		return emitResult(renderJSON, Result{Command: commandSealLs, Data: data})
+	}
+	return emitResult(renderHuman, Result{Command: commandSealLs, Data: data})
+}
+
+// sealLsFail routes a seal ls failure to the right output. JSON requests
+// render an ok:false envelope on stdout; plain requests keep existing behavior.
+func sealLsFail(opts sealLsOptions, err error) error {
+	if !opts.JSON {
+		return err
+	}
+	return emitError(renderJSON, toCommandError(commandSealLs, err))
 }
 
 // cmdSealDoctor validates the whole path seal store for the current Git
