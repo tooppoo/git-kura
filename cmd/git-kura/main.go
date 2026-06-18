@@ -563,7 +563,7 @@ func cmdOpenDryRun(opts openOptions, repoRoot, key, path, branch string) error {
 // request is migrated onto the framework, so it renders an ok:false envelope on
 // stdout; every other open invocation keeps the existing plain-error behavior.
 func openFail(opts openOptions, err error) error {
-	if !(opts.DryRun && opts.JSON) {
+	if !opts.DryRun || !opts.JSON {
 		return err
 	}
 	return emitError(renderJSON, toCommandError(commandOpen, err))
