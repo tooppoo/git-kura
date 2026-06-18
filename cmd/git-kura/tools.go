@@ -30,13 +30,6 @@ uninstall require at least one component or --all; --all may not be combined
 with explicit component names. status does not accept --all and never accesses
 the network.
 
-The pre-commit component is a local safety guard installed as a Husky-style
-core.hooksPath wrapper. Like any Git hook it is bypassable with
-"git commit --no-verify"; it is not server-side enforcement.
-
-"git kura tools run pre-commit" is an internal command invoked by the managed
-hook wrapper, not a primary user command.
-
 Run "git kura tools <subcommand> --help" for subcommand-specific help.`
 
 const toolsStatusHelp = `Usage: git kura tools status [component...]
