@@ -356,15 +356,82 @@ func requireStdoutNotContainsLine(t *testing.T, result cliResult, notWant string
 	}
 }
 
-func requireConformsToOutputSchema(t *testing.T, jsonOutput string) {
+// requireDataConformsToSchema validates a command's data payload against its
+// command-specific schema.
+func requireDataConformsToSchema(t *testing.T, schema *jsonschema.Schema, data map[string]any) {
 	t.Helper()
 
-	inst, err := jsonschema.UnmarshalJSON(strings.NewReader(jsonOutput))
+	raw, err := json.Marshal(data)
 	if err != nil {
-		t.Fatalf("parse json output: %v\noutput: %s", err, jsonOutput)
+		t.Fatalf("marshal data: %v", err)
 	}
+	inst, err := jsonschema.UnmarshalJSON(strings.NewReader(string(raw)))
+	if err != nil {
+		t.Fatalf("parse data: %v\ndata: %s", err, raw)
+	}
+	if err := schema.Validate(inst); err != nil {
+		t.Fatalf("data does not conform to schema:\n%v\ndata: %s", err, raw)
+	}
+}
 
-	if err := outputSchema.Validate(inst); err != nil {
-		t.Fatalf("json output does not conform to schema:\n%v\noutput: %s", err, jsonOutput)
+// requireSuccessEnvelopeData validates that jsonOutput is a success envelope for
+// command whose data conforms to schema, and returns the data object. It is the
+// envelope-aware replacement for the pre-migration raw-output validation.
+func requireSuccessEnvelopeData(t *testing.T, jsonOutput, command string, schema *jsonschema.Schema) map[string]any {
+	t.Helper()
+
+	requireConformsToEnvelopeSchema(t, jsonOutput)
+	env := requireJSONMetadata(t, jsonOutput)
+	if env["ok"] != true {
+		t.Fatalf("envelope ok = %v, want true\noutput: %s", env["ok"], jsonOutput)
+	}
+	if env["command"] != command {
+		t.Fatalf("envelope command = %v, want %q\noutput: %s", env["command"], command, jsonOutput)
+	}
+	data, ok := env["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("envelope data is not an object: %v\noutput: %s", env["data"], jsonOutput)
+	}
+	requireDataConformsToSchema(t, schema, data)
+	return data
+}
+
+// requireErrorEnvelope validates that jsonOutput is an ok:false error envelope
+// for command and returns it.
+func requireErrorEnvelope(t *testing.T, jsonOutput, command string) map[string]any {
+	t.Helper()
+
+	requireConformsToEnvelopeSchema(t, jsonOutput)
+	env := requireJSONMetadata(t, jsonOutput)
+	if env["ok"] != false {
+		t.Fatalf("envelope ok = %v, want false\noutput: %s", env["ok"], jsonOutput)
+	}
+	if env["command"] != command {
+		t.Fatalf("envelope command = %v, want %q\noutput: %s", env["command"], command, jsonOutput)
+	}
+	if _, hasData := env["data"]; hasData {
+		t.Fatalf("error envelope must not contain data\noutput: %s", jsonOutput)
+	}
+	if _, hasError := env["error"].(map[string]any); !hasError {
+		t.Fatalf("error envelope must contain an error object\noutput: %s", jsonOutput)
+	}
+	return env
+}
+
+// requireErrorEnvelopeMessageContains asserts that jsonOutput is an ok:false
+// error envelope for command whose error.message contains every substring.
+func requireErrorEnvelopeMessageContains(t *testing.T, jsonOutput, command string, substrings ...string) {
+	t.Helper()
+
+	env := requireErrorEnvelope(t, jsonOutput, command)
+	errObj := env["error"].(map[string]any)
+	message, ok := errObj["message"].(string)
+	if !ok {
+		t.Fatalf("error.message is not a string: %v", errObj["message"])
+	}
+	for _, want := range substrings {
+		if !strings.Contains(message, want) {
+			t.Fatalf("error.message = %q, want it to contain %q", message, want)
+		}
 	}
 }

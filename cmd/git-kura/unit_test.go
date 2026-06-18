@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -236,6 +237,31 @@ func TestParseOpenArgs(t *testing.T) {
 		}
 	})
 
+	t.Run("dry-run and json in either order", func(t *testing.T) {
+		for _, args := range [][]string{
+			{"51", "--dry-run", "--json"},
+			{"51", "--json", "--dry-run"},
+		} {
+			_, opts, err := parseOpenArgs(args)
+			if err != nil {
+				t.Fatalf("parseOpenArgs(%v) unexpected error: %v", args, err)
+			}
+			if !opts.DryRun || !opts.JSON {
+				t.Fatalf("parseOpenArgs(%v) = %+v, want DryRun and JSON true", args, opts)
+			}
+		}
+	})
+
+	t.Run("json without dry-run is usage error", func(t *testing.T) {
+		_, _, err := parseOpenArgs([]string{"51", "--json"})
+		if err == nil {
+			t.Fatal("expected error for --json without --dry-run, got nil")
+		}
+		if !strings.Contains(strings.ToLower(err.Error()), "dry-run") {
+			t.Fatalf("error %q does not mention --dry-run", err.Error())
+		}
+	})
+
 	t.Run("no key is usage error", func(t *testing.T) {
 		_, _, err := parseOpenArgs([]string{})
 		if err == nil {
@@ -294,10 +320,97 @@ func TestParseKeyOnlyArgs(t *testing.T) {
 	})
 }
 
-func TestPrintJSONRejectsInvalidData(t *testing.T) {
-	if err := printJSON(worktreeJSON{}); err == nil {
-		t.Fatal("printJSON invalid data error = nil, want error")
+func TestValidateDataRejectsInvalidData(t *testing.T) {
+	// A zero worktreeJSON violates the get data schema (empty required strings),
+	// so validateData must reject it before it is wrapped in an envelope.
+	if err := validateData(getDataSchema, worktreeJSON{}); err == nil {
+		t.Fatal("validateData invalid data error = nil, want error")
 	}
+}
+
+func TestValidateDataRejectsUnmarshalableData(t *testing.T) {
+	// A channel cannot be marshaled to JSON, so validateData must surface the
+	// marshal failure rather than panic or produce a malformed payload.
+	if err := validateData(getDataSchema, make(chan int)); err == nil {
+		t.Fatal("validateData unmarshalable data error = nil, want error")
+	}
+}
+
+func TestValidateDataAcceptsValidData(t *testing.T) {
+	data := worktreeJSON{
+		SchemaVersion:  1,
+		Key:            "51",
+		Kind:           "worktree",
+		Branch:         "51",
+		WorktreePath:   "/repo/.git/kura/worktrees/51",
+		RepositoryRoot: "/repo",
+		BaseBranch:     "main",
+		Exists:         true,
+		Dirty:          false,
+	}
+	if err := validateData(getDataSchema, data); err != nil {
+		t.Fatalf("validateData valid data error = %v, want nil", err)
+	}
+	// The same shape is valid against the dry-run schema when exists/dirty are
+	// false, which a dry run guarantees.
+	data.Exists = false
+	if err := validateData(openDryRunDataSchema, data); err != nil {
+		t.Fatalf("validateData dry-run data error = %v, want nil", err)
+	}
+}
+
+func TestRenderedErrorErrorIsEmpty(t *testing.T) {
+	// The sentinel carries only an exit code; its message is intentionally empty
+	// so main never prints it after the renderer has already written the failure.
+	if got := (&renderedError{code: exitUnsafeRefused}).Error(); got != "" {
+		t.Fatalf("renderedError.Error() = %q, want empty", got)
+	}
+}
+
+func TestExitErrorUnwrap(t *testing.T) {
+	inner := fmt.Errorf("inner")
+	xe := &exitError{code: exitNotFound, err: inner}
+	if !errors.Is(xe, inner) {
+		t.Fatal("errors.Is(exitError, inner) = false, want true")
+	}
+}
+
+func TestReasonForExitCode(t *testing.T) {
+	cases := map[int]string{
+		exitUsageError:      "usage-error",
+		exitUnsafeRefused:   "unsafe-refused",
+		exitNotFound:        "not-found",
+		exitSealLockTimeout: "seal-lock-timeout",
+		exitSealConflict:    "seal-conflict",
+		exitSealDoctorError: "seal-doctor-error",
+		exitGuardConflict:   "guard-conflict",
+		exitGeneralError:    "general-error",
+		9999:                "general-error",
+	}
+	for code, want := range cases {
+		if got := reasonForExitCode(code); got != want {
+			t.Fatalf("reasonForExitCode(%d) = %q, want %q", code, got, want)
+		}
+	}
+}
+
+func TestToCommandError(t *testing.T) {
+	t.Run("plain error is a general error", func(t *testing.T) {
+		ce := toCommandError(commandGet, fmt.Errorf("boom"))
+		if ce.Code != "general-error" || ce.ExitCode != exitGeneralError {
+			t.Fatalf("toCommandError plain = %+v, want general-error/%d", ce, exitGeneralError)
+		}
+		if ce.Message != "boom" || ce.Command != commandGet {
+			t.Fatalf("toCommandError plain = %+v, want message boom, command get", ce)
+		}
+	})
+
+	t.Run("exitError keeps its code and reason", func(t *testing.T) {
+		ce := toCommandError(commandOpen, exitCodeError(exitNotFound, fmt.Errorf("missing")))
+		if ce.Code != "not-found" || ce.ExitCode != exitNotFound {
+			t.Fatalf("toCommandError exitError = %+v, want not-found/%d", ce, exitNotFound)
+		}
+	})
 }
 
 func TestPrintTOONFormat(t *testing.T) {
