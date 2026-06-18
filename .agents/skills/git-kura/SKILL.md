@@ -48,17 +48,16 @@ order. Never start editing before claiming the files you intend to change.
    cd "$(git kura get <key>)"
    ```
 
-3. Acquire the cooperative worktree guard before doing any work:
+3. Check the worktree state before starting work:
 
    ```sh
-   git kura guard acquire
+   git status --short
    ```
 
-   This prevents another agent from starting work in the same worktree at the
-   same time. The guard key is the worktree's current key; never pass it as an
-   argument. If `guard acquire` exits with code 8 and prints `guard-active:`,
-   another agent is already using this worktree. Stop and report instead of
-   working around it.
+   Review uncommitted changes and the index. If the worktree has unexpected
+   changes from a prior session, clarify with the user before proceeding.
+   git-kura does not enforce same-worktree exclusion; use `git status --short`
+   to detect shared state manually.
 
 4. List the files you plan to change, then claim all of them:
 
@@ -91,11 +90,13 @@ order. Never start editing before claiming the files you intend to change.
 
    Use `git kura seal ls <key>` to confirm which paths the key still claims.
 
-9. Release the worktree guard when you finish working in the worktree:
+9. Check the worktree state before leaving:
 
    ```sh
-   git kura guard release
+   git status --short
    ```
+
+   Confirm there are no unexpected uncommitted changes before tearing down.
 
 10. Tear down the worktree:
 
@@ -133,11 +134,10 @@ For reviews:
    git log --oneline --decorate -n 10
    ```
 
-4. Review from inside that worktree. Do not acquire the worktree guard for a
-   read-only review.
+4. Review from inside that worktree.
 5. In review mode, do not edit files unless the user explicitly asks for fixes.
-   If fixes are requested, acquire the guard and claim the files before making
-   changes, following the implementation workflow's guard and seal rules.
+   If fixes are requested, run `git status --short` and claim the files before
+   making changes, following the implementation workflow's seal rules.
 
 Lead review responses with bugs, regressions, missing tests, and safety risks.
 If no issues are found, say so and name the checks performed.

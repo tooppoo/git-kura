@@ -1,9 +1,10 @@
 # ADR: Derive seal context from managed worktrees and separate worktree guards from path seals
 
-Status: Partially superseded by [20260614T002323Z_supersede-legacy-seal-command-model.md](20260614T002323Z_supersede-legacy-seal-command-model.md) Created: 2026-06-13T06:46:51Z
+Status: Partially superseded by [20260614T002323Z_supersede-legacy-seal-command-model.md](20260614T002323Z_supersede-legacy-seal-command-model.md) and [20260618T000000Z_remove-worktree-guard.md](20260618T000000Z_remove-worktree-guard.md). Created: 2026-06-13T06:46:51Z
 
 > **Partially superseded.** Removing `seal enter`, deriving the current key from the managed worktree, the `claim` / `unclaim` semantics, and path seals as cross-worktree conflict detection are still current. Superseded: retaining `seal add` / `seal remove` as deprecated aliases (they were removed outright), `GIT_KURA_SEAL_KEY` as a migration-time current-key mechanism (it is no longer consulted), and the command name `seal check` (implemented as `seal test`).
-> Still intended but not yet implemented (deferred, **not** superseded): `seal test --staged` and worktree guards (`guard acquire/release/status`). See [20260614T002323Z_supersede-legacy-seal-command-model.md](20260614T002323Z_supersede-legacy-seal-command-model.md).
+> The worktree guard section (section 5 and associated rationale, implementation notes, and documentation impact) is superseded by [20260618T000000Z_remove-worktree-guard.md](20260618T000000Z_remove-worktree-guard.md). `git kura guard` has been removed from git-kura core.
+> Still deferred (**not** superseded): `seal test --staged`. See [20260614T002323Z_supersede-legacy-seal-command-model.md](20260614T002323Z_supersede-legacy-seal-command-model.md).
 
 ## Context
 

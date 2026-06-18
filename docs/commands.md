@@ -26,9 +26,6 @@ git kura seal unclaim <path...> # release the current seal key's claim on paths
 git kura seal test <path...>    # check paths against the current seal context
 git kura seal ls [key]          # list claimed paths (project-wide by default)
 git kura seal doctor            # validate the project-wide seal store
-git kura guard acquire          # acquire the cooperative guard for the current worktree
-git kura guard release          # release the cooperative guard for the current worktree
-git kura guard status           # print the guard status for the current worktree
 git kura tools status            # show the install state of every component
 git kura tools status pre-commit # show the install state of one component
 git kura tools install <comp...> # install components from the matching release asset
@@ -231,56 +228,6 @@ An absent `paths.json` is treated as an empty store and succeeds. A healthy stor
 
 If the store is malformed or inconsistent, `doctor` exits with `seal-doctor-error` (code 7) and reports every problematic store entry it finds on stderr, so all issues can be fixed in a single pass. `doctor` is read-only: it does not modify `paths.json`, does not take `paths.lock`, and does not create, remove, or rewrite a lock file.
 
-## Guard commands
-
-`git kura guard` manages a *cooperative worktree guard*: a lease over a single managed worktree that prevents two agents from starting work in the same worktree at the same time, where they would share one working tree and index. This is distinct from `git kura seal`, which detects cross-worktree file conflicts.
-
-The guard key is the current managed worktree's key. It is never passed as an argument. Run guard commands from inside the worktree created by `git kura open <key>`; any subdirectory of the worktree resolves to the same guard key. All three commands fail when the current directory is not inside a managed worktree, or when that worktree's metadata is missing or inconsistent.
-
-The guard record lives under the Git common dir at `<git-common-dir>/kura/guards/worktrees/<key>.json`, so it is shared by every view of the repository. The record holds `key`, `worktreePath`, and `createdAt`. In v0 it carries no agent identity, token, heartbeat, `updatedAt`, or PID, and there is no stale-guard detection: a record that exists is always treated as an active guard.
-
-This is a cooperative guard, not an OS-level lock. A process that ignores git-kura can still use the same worktree.
-
-### `git kura guard acquire`
-
-Acquire the guard for the current managed worktree.
-
-```sh
-cd "$(git kura get issue-31)"
-git kura guard acquire
-```
-
-The guard record is created atomically with an exclusive create (`O_CREATE | O_EXCL`): there is no check-then-write window, so at most one concurrent `acquire` can succeed. If an active guard already exists, `acquire` exits with `guard-active` (code 8). A pre-existing record is always treated as active and is never inspected or auto-removed, so a corrupted record also blocks `acquire` rather than being silently replaced.
-
-### `git kura guard release`
-
-Release the guard for the current managed worktree.
-
-```sh
-git kura guard release
-```
-
-If a guard record exists it is removed. If no guard record exists, `release` prints a warning and exits 0. In v0, `release` does not require a token: any agent inside the worktree may release the guard.
-
-### `git kura guard status`
-
-Print the guard status for the current managed worktree.
-
-```sh
-git kura guard status
-```
-
-Output is one `field: value` line per field:
-
-```txt
-guarded: true
-key: issue-31
-worktreePath: /absolute/path/to/worktree
-createdAt: 2026-06-13T00:00:00Z
-```
-
-`guarded` is `true` when a record exists and `false` otherwise. `key` and `worktreePath` are derived from the current worktree, so the guarded state is reported consistently even when an existing record cannot be parsed. `createdAt` is printed only when guarded.
-
 ## Tools commands
 
 `git kura tools` installs, removes, and inspects *tool components*: self-contained helpers — such as a pre-commit hook or an editor skill — that git-kura installs into the repository from a verified release asset and can later remove.
@@ -380,6 +327,5 @@ Kura uses stable exit codes so scripts and AI-agent workflows can react correctl
 | 5 | Seal lock timeout |
 | 6 | Seal conflict |
 | 7 | Seal doctor error |
-| 8 | Guard conflict |
 
-Exit code 5 is signalled by `seal claim`, `seal unclaim`, `close`, `tools install`, and `tools uninstall`. Exit code 6 is signalled by `seal claim`, `seal unclaim`, and `seal test`. Exit code 7 is signalled by `seal doctor` when the seal store fails integrity validation. Exit code 8 is signalled by `guard acquire` when the worktree is already guarded. The stderr message always starts with a stable reason token (`seal-lock-timeout:` or `tools-metadata-lock-timeout:` for code 5, `seal-conflict:`, `seal-doctor-error:`, or `guard-active:`) that scripts can match without parsing arbitrary text.
+Exit code 5 is signalled by `seal claim`, `seal unclaim`, `close`, `tools install`, and `tools uninstall`. Exit code 6 is signalled by `seal claim`, `seal unclaim`, and `seal test`. Exit code 7 is signalled by `seal doctor` when the seal store fails integrity validation. The stderr message always starts with a stable reason token (`seal-lock-timeout:` or `tools-metadata-lock-timeout:` for code 5, `seal-conflict:`, or `seal-doctor-error:`) that scripts can match without parsing arbitrary text.
