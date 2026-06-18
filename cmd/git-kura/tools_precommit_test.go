@@ -1134,6 +1134,71 @@ func TestCollectDiagnosticsKeySource(t *testing.T) {
 	if d.currentKeySource != "ambiguous" {
 		t.Fatalf("currentKeySource = %q, want ambiguous", d.currentKeySource)
 	}
+
+	// Replace the worktrees dir with a plain file so os.ReadDir fails with a
+	// non-IsNotExist error, exercising the currentKeySource="error" branch.
+	worktreesDir := filepath.Join(commonDir, "kura", "meta", "worktrees")
+	if err := os.RemoveAll(worktreesDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(worktreesDir, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d = collectPreCommitDiagnostics(repo, commonDir, preCommitMeta{})
+	if d.currentKeySource != "error" {
+		t.Fatalf("currentKeySource = %q, want error", d.currentKeySource)
+	}
+}
+
+func TestPreCommitStatusHooksPathMismatch(t *testing.T) {
+	repo := toolsTestRepo(t)
+	deps := preCommitDeps(t)
+	if _, err := runToolsCLI(t, repo, deps, "install", "pre-commit"); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	// Enable worktree config and shadow the repository-local value with a
+	// worktree-level override, making currentHooksPath differ from effectiveHooksPath.
+	git(t, repo, "config", "--local", "extensions.worktreeConfig", "true")
+	git(t, repo, "config", "--worktree", "core.hooksPath", filepath.Join(repo, "other"))
+
+	out, err := runToolsCLI(t, repo, deps, "status", "pre-commit")
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !strings.Contains(out, "hooksPathMismatch=true") {
+		t.Fatalf("status should report hooksPathMismatch=true when effective and local values diverge:\n%s", out)
+	}
+}
+
+func TestPersistDeleteEntryNonRepoError(t *testing.T) {
+	dir := t.TempDir() // not a git repo — toolsMetadataPaths fails at CommonDir
+	if err := persistPreCommitEntry(dir, toolsMetadataEntry{}); err == nil {
+		t.Fatal("persistPreCommitEntry should fail outside a git repo")
+	}
+	if err := deletePreCommitEntry(dir); err == nil {
+		t.Fatal("deletePreCommitEntry should fail outside a git repo")
+	}
+}
+
+func TestRunPreviousPreCommitInvalidMeta(t *testing.T) {
+	repo := toolsTestRepo(t)
+	commonDir := filepath.Join(repo, ".git")
+	// Write a pre-commit entry whose componentMetadata fails the pre-commit schema
+	// (installState "bad" is not in the allowed enum). runPreviousPreCommit must
+	// silently skip the invalid entry rather than hard-fail.
+	entry := toolsMetadataEntry{
+		Component:         preCommitComponentID,
+		ManagedMode:       managedModeConfig,
+		ComponentMetadata: map[string]any{"installState": "bad"},
+		CreatedAt:         time.Now().UTC().Format(time.RFC3339),
+		UpdatedAt:         time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := persistPreCommitEntry(repo, entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := runPreviousPreCommit(repo, commonDir, nil); err != nil {
+		t.Fatalf("invalid meta should be silently skipped, got %v", err)
+	}
 }
 
 func TestPreCommitSealCheckFailsOnCorruptStore(t *testing.T) {
