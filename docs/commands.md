@@ -115,7 +115,7 @@ for key in $(git kura ls); do
 done
 ```
 
-With `--json`, emits a [common output envelope](adr/20260612T161433Z_json-output-envelope-schema.md) whose `data` field is:
+With `--json`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
 
 ```json
 {
@@ -223,7 +223,7 @@ An absent store, an empty store, or a key with no claimed paths all produce empt
 
 `ls` is read-only and does not take the store lock, so it is never blocked by a held `paths.lock`.
 
-With `--json`, emits a [common output envelope](adr/20260612T161433Z_json-output-envelope-schema.md) whose `data` field is:
+With `--json`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
 
 ```json
 {
