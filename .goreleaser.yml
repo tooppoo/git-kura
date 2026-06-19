@@ -4,7 +4,7 @@ project_name: git-kura
 
 before:
   hooks:
-    - sh scripts/build-tools-archive.sh {{ .Version }} dist/tools
+    - sh scripts/build-tools-archive.sh {{ .Version }} .tools-dist
 
 builds:
   - id: git-kura
@@ -38,8 +38,8 @@ archives:
 
 release:
   extra_files:
-    - glob: dist/tools/git-kura-tools_*.tar.gz
-    - glob: dist/tools/git-kura-tools_*.json
+    - glob: .tools-dist/git-kura-tools_*.tar.gz
+    - glob: .tools-dist/git-kura-tools_*.json
 
 checksum:
   name_template: checksums.txt

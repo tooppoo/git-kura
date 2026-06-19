@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -704,20 +703,4 @@ func TestSkillInstallBlockedWhenMetadataDeletedButFileExists(t *testing.T) {
 	if !strings.Contains(out, "unmanaged") {
 		t.Fatalf("install with deleted metadata and existing file should fail as unmanaged:\n%s", out)
 	}
-}
-
-// parseWorktreeMetadata is a local helper for reading just the RepositoryRoot field.
-func parseWorktreeMetadata(t *testing.T, path string) string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read worktree metadata: %v", err)
-	}
-	var meta struct {
-		RepositoryRoot string `json:"repositoryRoot"`
-	}
-	if err := json.Unmarshal(data, &meta); err != nil {
-		t.Fatalf("parse worktree metadata: %v", err)
-	}
-	return meta.RepositoryRoot
 }

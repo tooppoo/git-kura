@@ -55,7 +55,7 @@ license-save:
 
 .PHONY: tools-archive
 tools-archive:
-	sh scripts/build-tools-archive.sh $(VERSION) dist/tools
+	sh scripts/build-tools-archive.sh $(VERSION) .tools-dist
 
 .PHONY: check
 check: fmt-check vet coverage vuln license-check
