@@ -704,3 +704,104 @@ func TestSkillInstallBlockedWhenMetadataDeletedButFileExists(t *testing.T) {
 		t.Fatalf("install with deleted metadata and existing file should fail as unmanaged:\n%s", out)
 	}
 }
+
+func TestPendingComponentStatus(t *testing.T) {
+	c := newPendingComponent("future-tool", "https://github.com/tooppoo/git-kura/issues/999")
+	out := c.status(toolsContext{})
+	if out.result.Action != actionNotInstalled {
+		t.Fatalf("pending status action = %q, want %q", out.result.Action, actionNotInstalled)
+	}
+	if !strings.Contains(out.result.Reason, "future-tool") && !strings.Contains(out.result.Reason, "not yet") {
+		t.Fatalf("pending status reason = %q, want it to mention the component or pending state", out.result.Reason)
+	}
+}
+
+func TestSkillStatusInstalledButFileMissing(t *testing.T) {
+	repo := toolsTestRepo(t)
+	content := []byte("skill content")
+	deps := skillDeps(t, content, []byte("codex"))
+
+	if _, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	if err := os.Remove(claudeSkillDest(repo)); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runToolsCLI(t, repo, deps, "status", claudeSkillComponentID)
+	if err != nil {
+		t.Fatalf("status: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "not-installed") {
+		t.Fatalf("status with missing file should report not-installed:\n%s", out)
+	}
+	if !strings.Contains(out, "missing") {
+		t.Fatalf("status with missing file should mention missing:\n%s", out)
+	}
+}
+
+func TestSkillUninstallWhenFileAlreadyDeleted(t *testing.T) {
+	repo := toolsTestRepo(t)
+	content := []byte("skill content")
+	deps := skillDeps(t, content, []byte("codex"))
+
+	if _, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	if err := os.Remove(claudeSkillDest(repo)); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runToolsCLI(t, repo, deps, "uninstall", claudeSkillComponentID)
+	if err != nil {
+		t.Fatalf("uninstall with already-deleted file: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "removed") {
+		t.Fatalf("uninstall should report removed:\n%s", out)
+	}
+}
+
+func TestResolveRepresentativeRootMalformedMetadata(t *testing.T) {
+	repo := toolsTestRepo(t)
+	commitFile(t, repo, "init.txt", "initial\n")
+
+	commonDir := filepath.Join(repo, ".git")
+	key := "badmeta"
+	worktreePath := filepath.Join(commonDir, "kura", "worktrees", key)
+	metaPath := filepath.Join(commonDir, "kura", "meta", "worktrees", key+".json")
+
+	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(metaPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Valid JSON but missing repositoryRoot field.
+	if err := os.WriteFile(metaPath, []byte(`{"key":"badmeta"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := resolveRepresentativeRoot(worktreePath, commonDir)
+	if err == nil {
+		t.Fatal("expected error for metadata without repositoryRoot")
+	}
+	if !strings.Contains(err.Error(), "missing-repository-metadata") {
+		t.Fatalf("error = %q, want missing-repository-metadata", err.Error())
+	}
+}
+
+func TestResolveRepresentativeRootCommonDirError(t *testing.T) {
+	// A plain directory (not a git repo) triggers a CommonDir error.
+	tmp := t.TempDir()
+	commonDir := filepath.Join(tmp, ".git")
+
+	_, err := resolveRepresentativeRoot(tmp, commonDir)
+	if err == nil {
+		t.Fatal("expected error when CommonDir resolution fails")
+	}
+	if !strings.Contains(err.Error(), "representative-root-common-dir-mismatch") {
+		t.Fatalf("error = %q, want representative-root-common-dir-mismatch", err.Error())
+	}
+}

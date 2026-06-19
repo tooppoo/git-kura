@@ -1141,7 +1141,7 @@ func TestSealLsHelpFlag(t *testing.T) {
 
 	result := cli.gitKura(repo, "seal", "ls", "--help")
 	requireExitCode(t, result, 0)
-	if !strings.Contains(result.stdout, "Usage: git kura seal ls [key]") {
+	if !strings.Contains(result.stdout, "Usage: git kura seal ls [--json] [key]") {
 		t.Fatalf("help output = %s, want usage line", result.stdout)
 	}
 }
@@ -1472,4 +1472,234 @@ func TestCloseAbsentPathsJSONContinues(t *testing.T) {
 	requireExitCode(t, cli.gitKura(repo, "close", "key1"), 0)
 	assertPathMissing(t, expectedWorktreePath(repo, "key1"))
 	assertPathMissing(t, expectedMetadataPath(repo, "key1"))
+}
+
+// --- ls --json integration tests ---
+
+func TestLsJSONEmptyWorktrees(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "ls", "--json")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "ls", lsDataSchema)
+	keys, ok := data["keys"].([]any)
+	if !ok {
+		t.Fatalf("data.keys is not an array: %v", data["keys"])
+	}
+	if len(keys) != 0 {
+		t.Fatalf("data.keys = %v, want empty array", keys)
+	}
+}
+
+func TestLsJSONListsOpenWorktrees(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	requireExitCode(t, cli.gitKura(repo, "open", "62"), 0)
+
+	result := cli.gitKura(repo, "ls", "--json")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "ls", lsDataSchema)
+	keys, ok := data["keys"].([]any)
+	if !ok {
+		t.Fatalf("data.keys is not an array: %v", data["keys"])
+	}
+	if len(keys) != 2 {
+		t.Fatalf("data.keys = %v, want 2 entries", keys)
+	}
+	if keys[0] != "51" || keys[1] != "62" {
+		t.Fatalf("data.keys = %v, want [51, 62] (alphabetically sorted)", keys)
+	}
+}
+
+func TestLsJSONKeysAreSorted(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "z-key"), 0)
+	requireExitCode(t, cli.gitKura(repo, "open", "a-key"), 0)
+	requireExitCode(t, cli.gitKura(repo, "open", "m-key"), 0)
+
+	result := cli.gitKura(repo, "ls", "--json")
+	requireExitCode(t, result, 0)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "ls", lsDataSchema)
+	keys, _ := data["keys"].([]any)
+	if len(keys) != 3 || keys[0] != "a-key" || keys[1] != "m-key" || keys[2] != "z-key" {
+		t.Fatalf("data.keys = %v, want [a-key, m-key, z-key]", keys)
+	}
+}
+
+func TestLsJSONFailsOutsideRepo(t *testing.T) {
+	cli := newTestCLI(t)
+	outside := t.TempDir()
+
+	result := cli.gitKura(outside, "ls", "--json")
+	requireNonZeroExitCode(t, result)
+	requireEmptyStderr(t, result)
+
+	env := requireErrorEnvelope(t, result.stdout, "ls")
+	errObj := env["error"].(map[string]any)
+	if !strings.Contains(errObj["message"].(string), "repository") {
+		t.Fatalf("error.message = %v, want it to mention the repository", errObj["message"])
+	}
+}
+
+func TestLsJSONConformsToEnvelopeSchema(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	result := cli.gitKura(repo, "ls", "--json")
+	requireExitCode(t, result, 0)
+	requireConformsToEnvelopeSchema(t, result.stdout)
+}
+
+// --- seal ls --json integration tests ---
+
+func TestSealLsJSONEmptyStore(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "seal", "ls", "--json")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.ls", sealLsDataSchema)
+	if data["filterKey"] != nil {
+		t.Fatalf("filterKey = %v, want null", data["filterKey"])
+	}
+	claims, ok := data["claims"].([]any)
+	if !ok {
+		t.Fatalf("claims is not an array: %v", data["claims"])
+	}
+	if len(claims) != 0 {
+		t.Fatalf("claims = %v, want empty", claims)
+	}
+}
+
+func TestSealLsJSONProjectWide(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	commitFile(t, repo, "second.txt", "content\n")
+	wt1 := cli.openWorktree(t, repo, "key1")
+	wt2 := cli.openWorktree(t, repo, "key2")
+
+	requireExitCode(t, cli.gitKura(wt2, "seal", "claim", "second.txt"), 0)
+	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "tracked.txt"), 0)
+
+	result := cli.gitKura(repo, "seal", "ls", "--json")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.ls", sealLsDataSchema)
+	if data["filterKey"] != nil {
+		t.Fatalf("filterKey = %v, want null", data["filterKey"])
+	}
+	claims, ok := data["claims"].([]any)
+	if !ok || len(claims) != 2 {
+		t.Fatalf("claims = %v, want 2 entries", data["claims"])
+	}
+	c0 := claims[0].(map[string]any)
+	c1 := claims[1].(map[string]any)
+	if c0["key"] != "key1" || c0["path"] != "tracked.txt" {
+		t.Fatalf("claims[0] = %v, want {key:key1, path:tracked.txt}", c0)
+	}
+	if c1["key"] != "key2" || c1["path"] != "second.txt" {
+		t.Fatalf("claims[1] = %v, want {key:key2, path:second.txt}", c1)
+	}
+}
+
+func TestSealLsJSONKeyFiltered(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	commitFile(t, repo, "second.txt", "content\n")
+	wt1 := cli.openWorktree(t, repo, "key1")
+	wt2 := cli.openWorktree(t, repo, "key2")
+
+	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "tracked.txt"), 0)
+	requireExitCode(t, cli.gitKura(wt2, "seal", "claim", "second.txt"), 0)
+
+	result := cli.gitKura(repo, "seal", "ls", "--json", "key2")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.ls", sealLsDataSchema)
+	if data["filterKey"] != "key2" {
+		t.Fatalf("filterKey = %v, want key2", data["filterKey"])
+	}
+	claims, ok := data["claims"].([]any)
+	if !ok || len(claims) != 1 {
+		t.Fatalf("claims = %v, want 1 entry", data["claims"])
+	}
+	c := claims[0].(map[string]any)
+	if c["key"] != "key2" || c["path"] != "second.txt" {
+		t.Fatalf("claims[0] = %v, want {key:key2, path:second.txt}", c)
+	}
+}
+
+func TestSealLsJSONKeyFilteredEmpty(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt1 := cli.openWorktree(t, repo, "key1")
+
+	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "tracked.txt"), 0)
+
+	result := cli.gitKura(repo, "seal", "ls", "--json", "key2")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.ls", sealLsDataSchema)
+	if data["filterKey"] != "key2" {
+		t.Fatalf("filterKey = %v, want key2", data["filterKey"])
+	}
+	claims, ok := data["claims"].([]any)
+	if !ok || len(claims) != 0 {
+		t.Fatalf("claims = %v, want empty", data["claims"])
+	}
+}
+
+func TestSealLsJSONKeyBeforeJSONIsUsageError(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "seal", "ls", "key1", "--json")
+	requireExitCode(t, result, exitUsageError)
+	// Must not be a JSON envelope — invalid position is a plain usage error.
+	requireEmptyStdout(t, result)
+	if result.stderr == "" {
+		t.Fatal("stderr = empty, want a usage error message")
+	}
+}
+
+func TestSealLsJSONFailsOutsideRepo(t *testing.T) {
+	cli := newTestCLI(t)
+	outside := t.TempDir()
+
+	result := cli.gitKura(outside, "seal", "ls", "--json")
+	requireNonZeroExitCode(t, result)
+	requireEmptyStderr(t, result)
+
+	env := requireErrorEnvelope(t, result.stdout, "seal.ls")
+	errObj := env["error"].(map[string]any)
+	if !strings.Contains(errObj["message"].(string), "repository") {
+		t.Fatalf("error.message = %v, want it to mention the repository", errObj["message"])
+	}
+}
+
+func TestSealLsJSONConformsToEnvelopeSchema(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "key1")
+	requireExitCode(t, cli.gitKura(wt, "seal", "claim", "tracked.txt"), 0)
+
+	result := cli.gitKura(repo, "seal", "ls", "--json")
+	requireExitCode(t, result, 0)
+	requireConformsToEnvelopeSchema(t, result.stdout)
 }

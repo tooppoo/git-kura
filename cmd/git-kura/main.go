@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
@@ -29,12 +30,16 @@ var getDataSchemaJSON []byte
 //go:embed schema/open_dry_run_data.schema.json
 var openDryRunDataSchemaJSON []byte
 
-// getDataSchema and openDryRunDataSchema are the command-specific schemas for the
-// data payload nested under the common envelope's data field. They version
-// independently of the envelope schema.
+//go:embed schema/commands/ls.schema.json
+var lsDataSchemaJSON []byte
+
+// getDataSchema, openDryRunDataSchema, and lsDataSchema are the command-specific
+// schemas for the data payload nested under the common envelope's data field.
+// They version independently of the envelope schema.
 var (
 	getDataSchema        = mustCompileSchema("get_data.schema.json", getDataSchemaJSON)
 	openDryRunDataSchema = mustCompileSchema("open_dry_run_data.schema.json", openDryRunDataSchemaJSON)
+	lsDataSchema         = mustCompileSchema("ls.schema.json", lsDataSchemaJSON)
 )
 
 func mustCompileSchema(name string, data []byte) *jsonschema.Schema {
@@ -104,9 +109,12 @@ unchanged.
 For the full cleanup order, paths.json handling, and recovery behavior, see
 https://github.com/tooppoo/git-kura/blob/main/docs/commands.md`
 
-const lsHelp = `Usage: git kura ls
+const lsHelp = `Usage: git kura ls [--json]
 
-List all currently open worktrees, one key per line.`
+List all currently open worktrees, one key per line.
+
+Flags:
+  --json   Print structured output as a JSON envelope`
 
 // exitError carries a specific exit code to be used by main.
 type exitError struct {
@@ -217,10 +225,11 @@ func run(args []string) error {
 			fmt.Println(lsHelp)
 			return nil
 		}
-		if err := parseLsArgs(args[1:]); err != nil {
+		opts, err := parseLsArgs(args[1:])
+		if err != nil {
 			return err
 		}
-		return cmdLs()
+		return cmdLs(opts)
 
 	case "seal":
 		return runSeal(args[1:])
@@ -262,6 +271,24 @@ type getOptions struct {
 type openOptions struct {
 	DryRun bool
 	JSON   bool
+}
+
+type lsOptions struct {
+	JSON bool
+}
+
+// lsData is the structured success payload for ls --json.
+type lsData struct {
+	Keys []string `json:"keys"`
+}
+
+func (d lsData) RenderHuman(w io.Writer) error {
+	for _, k := range d.Keys {
+		if _, err := fmt.Fprintln(w, k); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func parseGetArgs(args []string) (string, getOptions, error) {
@@ -700,33 +727,40 @@ func printTOON(data worktreeJSON) error {
 	return nil
 }
 
-func parseLsArgs(args []string) error {
-	if len(args) > 0 {
-		return fmt.Errorf("usage: git kura ls: unexpected argument %q", args[0])
+func parseLsArgs(args []string) (lsOptions, error) {
+	var opts lsOptions
+	for _, a := range args {
+		switch a {
+		case "--json":
+			opts.JSON = true
+		default:
+			return lsOptions{}, fmt.Errorf("usage: git kura ls [--json]: unexpected argument %q", a)
+		}
 	}
-	return nil
+	return opts, nil
 }
 
-func cmdLs() error {
+func cmdLs(opts lsOptions) error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
-		return fmt.Errorf("not inside a git repository")
+		return lsFail(opts, fmt.Errorf("not inside a git repository"))
 	}
 
 	dir, err := worktree.StateDir(repoRoot)
 	if err != nil {
-		return fmt.Errorf("resolve state dir: %w", err)
+		return lsFail(opts, fmt.Errorf("resolve state dir: %w", err))
 	}
 
 	entries, err := os.ReadDir(filepath.Join(dir, "meta", "worktrees"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			entries = nil
+		} else {
+			return lsFail(opts, fmt.Errorf("read metadata dir: %w", err))
 		}
-		return fmt.Errorf("read metadata dir: %w", err)
 	}
 
-	// os.ReadDir returns entries sorted by name
+	var keys []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -735,9 +769,32 @@ func cmdLs() error {
 		if !strings.HasSuffix(name, ".json") {
 			continue
 		}
-		fmt.Println(strings.TrimSuffix(name, ".json"))
+		keys = append(keys, strings.TrimSuffix(name, ".json"))
 	}
-	return nil
+	// os.ReadDir returns entries sorted by name, but normalise explicitly.
+	sort.Strings(keys)
+
+	data := lsData{Keys: keys}
+	if data.Keys == nil {
+		data.Keys = []string{}
+	}
+
+	if opts.JSON {
+		if err := validateData(lsDataSchema, data); err != nil {
+			return err
+		}
+		return emitResult(renderJSON, Result{Command: commandLs, Data: data})
+	}
+	return emitResult(renderHuman, Result{Command: commandLs, Data: data})
+}
+
+// lsFail routes an ls failure to the right output. JSON requests render an
+// ok:false envelope on stdout; plain requests keep the existing error behavior.
+func lsFail(opts lsOptions, err error) error {
+	if !opts.JSON {
+		return err
+	}
+	return emitError(renderJSON, toCommandError(commandLs, err))
 }
 
 // cmdClose tears down the worktree for key and releases every path seal that

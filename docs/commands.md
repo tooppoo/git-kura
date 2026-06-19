@@ -96,15 +96,16 @@ Kura should refuse to remove a worktree when doing so would discard uncommitted 
 
 After taking the lock, `close` reads and validates `paths.json` before any destructive cleanup. An absent `paths.json` is treated as an empty seal store and cleanup continues. If `paths.json` cannot be read or does not conform to the seal store schema, `close` does not start cleanup and leaves the worktree, branch, `paths.json`, and metadata unchanged. Only the seals whose `entry.key` equals the closed key are removed; claims held by other keys are left untouched.
 
-## `git kura ls`
+## `git kura ls [--json]`
 
 List all currently open worktrees managed by Kura.
 
 ```sh
 git kura ls
+git kura ls --json
 ```
 
-Prints one key per line to standard output, sorted alphabetically. If no worktrees are currently open, the output is empty and the exit code is 0.
+Without `--json`, prints one key per line to standard output, sorted alphabetically. If no worktrees are currently open, the output is empty and the exit code is 0.
 
 This command is designed for scripts and enumeration:
 
@@ -113,6 +114,16 @@ for key in $(git kura ls); do
   git kura get "$key" --toon
 done
 ```
+
+With `--json`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
+
+```json
+{
+  "keys": ["51", "62"]
+}
+```
+
+`keys` is a sorted string array of the open worktree keys, or `[]` when none are open. `ls --json` returns key names only; for per-key details use `git kura get <key> --json`. See [`docs/adr/20260618T145556Z_ls-json-returns-key-enumeration-only.md`](adr/20260618T145556Z_ls-json-returns-key-enumeration-only.md) for the rationale.
 
 ## Keys
 
@@ -191,7 +202,7 @@ A path is safe when it is unclaimed, or already claimed by the current key. A pa
 
 `seal test` exits 0 only when every path is safe. If any path conflicts it exits with `seal-conflict` (code 6) and reports each conflicting path with the key that claims it. `seal test` is read-only: it does not modify the store and does not take the store lock, so it is never blocked by a held `paths.lock`.
 
-## `git kura seal ls [key]`
+## `git kura seal ls [--json] [key]`
 
 List claimed paths recorded in the seal store, one per line:
 
@@ -211,6 +222,19 @@ The listed scope is the seal store in the Git common dir, shared by all worktree
 An absent store, an empty store, or a key with no claimed paths all produce empty output and exit 0. A store that cannot be parsed, has an unsupported `schemaVersion`, or does not match the store schema is an error.
 
 `ls` is read-only and does not take the store lock, so it is never blocked by a held `paths.lock`.
+
+With `--json`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
+
+```json
+{
+  "filterKey": null,
+  "claims": [
+    { "key": "issue-18", "path": "src/foo.go" }
+  ]
+}
+```
+
+`filterKey` is `null` for project-wide listing and the key string when a key argument is given. `claims` is always present (`[]` when empty). Each claim item always includes both `key` and `path` regardless of whether `filterKey` is set. `--json` must appear **before** the optional key argument; `seal ls <key> --json` is a usage error. See [`docs/adr/20260618T145559Z_seal-ls-json-uses-unified-claim-shape.md`](adr/20260618T145559Z_seal-ls-json-uses-unified-claim-shape.md) for the rationale.
 
 ## `git kura seal doctor`
 
