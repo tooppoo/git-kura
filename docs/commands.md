@@ -184,7 +184,7 @@ git kura seal unclaim src/foo.go tests/foo_test.go
 
 Only the key that claimed a path may release it. Attempting to unclaim a path claimed by a different key exits with `seal-conflict` (code 6). Paths not currently claimed are silently skipped (idempotent).
 
-## `git kura seal test <path> [path...]`
+## `git kura seal test [--json] <path> [path...]`
 
 Check whether one or more repository-relative paths may be handled in the current seal context, without modifying the store. `seal test` answers a single question: given the current key, is every listed path safe to edit?
 
@@ -198,9 +198,38 @@ git kura seal test src/foo.go tests/foo_test.go
 
 `seal test` fails when it is not run inside a managed worktree, or when that worktree's metadata is missing or inconsistent. This context error is distinct from a seal conflict. `GIT_KURA_SEAL_KEY` is **not** consulted for current-key resolution and does not affect the result.
 
-A path is safe when it is unclaimed, or already claimed by the current key. A path claimed by a different key is a conflict. Paths are interpreted relative to the repository root regardless of the current working directory; absolute paths and paths outside the repository are rejected. A path inside the repository that does not exist yet is treated as unclaimed, so `seal test` can check a file before it is created.
+A path is safe when it is unclaimed, or already claimed by the current key. A path claimed by a different key is a conflict regardless of whether the file exists in the current working tree. Paths are interpreted relative to the repository root regardless of the current working directory; absolute paths and paths outside the repository are rejected. A path inside the repository that does not exist yet and is unclaimed is treated as safe, so `seal test` can check a file before it is created.
 
 `seal test` exits 0 only when every path is safe. If any path conflicts it exits with `seal-conflict` (code 6) and reports each conflicting path with the key that claims it. `seal test` is read-only: it does not modify the store and does not take the store lock, so it is never blocked by a held `paths.lock`.
+
+With `--json`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
+
+```json
+{
+  "currentKey": "issue-18",
+  "passed": true,
+  "results": [
+    { "path": "src/foo.go", "status": "claimed-by-current-key", "safe": true, "claimedBy": "issue-18" },
+    { "path": "src/bar.go", "status": "unclaimed",              "safe": true, "claimedBy": null },
+    { "path": "new-file.go","status": "missing-path",           "safe": true, "claimedBy": null }
+  ]
+}
+```
+
+`currentKey` is the key derived from the current worktree. `passed` is `true` only when every path is safe. `results` preserves the input path order. Each result item always includes `path`, `status`, `safe`, and `claimedBy`.
+
+`status` values:
+
+| value | meaning | `safe` |
+|---|---|---|
+| `claimed-by-current-key` | claimed by the current key | `true` |
+| `claimed-by-other-key` | claimed by a different key | `false` |
+| `unclaimed` | not in the store and the file exists | `true` |
+| `missing-path` | not in the store and the file does not exist | `true` |
+
+When `passed` is `false`, `ok` is still `true` — the diagnostic ran successfully and produced a result — but the exit code is `seal-conflict` (6), preserving the existing CLI contract. See [`docs/adr/20260619T150000Z_diagnostic-output-execution-vs-result.md`](adr/20260619T150000Z_diagnostic-output-execution-vs-result.md) for the rationale.
+
+When current key resolution fails, `ok` is `false` and `error.code` is `current-key-unresolved`. `error.details.reason` provides a sub-classification: `not-inside-git-repository`, `not-in-managed-worktree`, `metadata-missing`, or `metadata-inconsistent`. `--json` must appear **before** the path arguments; any flag after the first path is a usage error.
 
 ## `git kura seal ls [--json] [key]`
 
@@ -236,7 +265,7 @@ With `--json`, emits a [common output envelope](adr/20260617T070134Z_output-fram
 
 `filterKey` is `null` for project-wide listing and the key string when a key argument is given. `claims` is always present (`[]` when empty). Each claim item always includes both `key` and `path` regardless of whether `filterKey` is set. `--json` must appear **before** the optional key argument; `seal ls <key> --json` is a usage error. See [`docs/adr/20260618T145559Z_seal-ls-json-uses-unified-claim-shape.md`](adr/20260618T145559Z_seal-ls-json-uses-unified-claim-shape.md) for the rationale.
 
-## `git kura seal doctor`
+## `git kura seal doctor [--json]`
 
 Validate the project-wide path seal store for the Git repository resolved from the current working directory.
 
@@ -251,6 +280,20 @@ An absent `paths.json` is treated as an empty store and succeeds. A healthy stor
 `doctor` validates the store file structure, `schemaVersion`, entry keys, repository-relative path syntax, `/` path separators, paths that escape the repository root, and paths that would duplicate another entry after normalization. It does not check whether stored paths currently exist in the working tree, whether they are files or directories, or where symlinks point.
 
 If the store is malformed or inconsistent, `doctor` exits with `seal-doctor-error` (code 7) and reports every problematic store entry it finds on stderr, so all issues can be fixed in a single pass. `doctor` is read-only: it does not modify `paths.json`, does not take `paths.lock`, and does not create, remove, or rewrite a lock file.
+
+With `--json`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
+
+```json
+{
+  "healthy": true,
+  "summary": { "checkedClaims": 3, "errorCount": 0, "warningCount": 0 },
+  "findings": []
+}
+```
+
+`healthy` is `true` only when no findings are reported. `summary.checkedClaims` is the number of store entries inspected. `findings` is always present (`[]` when healthy). Each finding includes `severity` (`error` or `warning`), `code` (a hyphen-case token identifying the violation), `path` (the offending store path, or `null` for store-level findings), and `message` (a human-readable description).
+
+When `healthy` is `false`, `ok` is still `true` — the store was read and inspected successfully — but the exit code is `seal-doctor-error` (7), preserving the existing CLI contract. When the store cannot be read or parsed, `ok` is `false`, `error.code` is `seal-doctor-error`, and the exit code is also 7. See [`docs/adr/20260619T150000Z_diagnostic-output-execution-vs-result.md`](adr/20260619T150000Z_diagnostic-output-execution-vs-result.md) for the rationale.
 
 ## Tools commands
 

@@ -15,7 +15,15 @@ import (
 //go:embed schema/commands/seal_ls.schema.json
 var sealLsDataSchemaJSON []byte
 
+//go:embed schema/commands/seal_test.schema.json
+var sealTestDataSchemaJSON []byte
+
+//go:embed schema/commands/seal_doctor.schema.json
+var sealDoctorDataSchemaJSON []byte
+
 var sealLsDataSchema = mustCompileSealLsDataSchema()
+var sealTestDataSchema = mustCompileSealTestDataSchema()
+var sealDoctorDataSchema = mustCompileSealDoctorDataSchema()
 
 func mustCompileSealLsDataSchema() *jsonschema.Schema {
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(sealLsDataSchemaJSON))
@@ -33,9 +41,49 @@ func mustCompileSealLsDataSchema() *jsonschema.Schema {
 	return sch
 }
 
+func mustCompileSealTestDataSchema() *jsonschema.Schema {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(sealTestDataSchemaJSON))
+	if err != nil {
+		panic(fmt.Sprintf("parse seal_test data schema: %v", err))
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("seal_test.schema.json", doc); err != nil {
+		panic(fmt.Sprintf("add seal_test data schema resource: %v", err))
+	}
+	sch, err := c.Compile("seal_test.schema.json")
+	if err != nil {
+		panic(fmt.Sprintf("compile seal_test data schema: %v", err))
+	}
+	return sch
+}
+
+func mustCompileSealDoctorDataSchema() *jsonschema.Schema {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(sealDoctorDataSchemaJSON))
+	if err != nil {
+		panic(fmt.Sprintf("parse seal_doctor data schema: %v", err))
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("seal_doctor.schema.json", doc); err != nil {
+		panic(fmt.Sprintf("add seal_doctor data schema resource: %v", err))
+	}
+	sch, err := c.Compile("seal_doctor.schema.json")
+	if err != nil {
+		panic(fmt.Sprintf("compile seal_doctor data schema: %v", err))
+	}
+	return sch
+}
+
 type sealLsOptions struct {
 	FilterKey string
 	JSON      bool
+}
+
+type sealTestOptions struct {
+	JSON bool
+}
+
+type sealDoctorOptions struct {
+	JSON bool
 }
 
 // sealLsClaim is one entry in the seal ls JSON output.
@@ -57,6 +105,69 @@ func (d sealLsData) RenderHuman(w io.Writer) error {
 		}
 	}
 	return nil
+}
+
+// sealTestResultItem is one path's inspection result in the seal test output.
+type sealTestResultItem struct {
+	Path      string  `json:"path"`
+	Status    string  `json:"status"`
+	Safe      bool    `json:"safe"`
+	ClaimedBy *string `json:"claimedBy"`
+}
+
+// sealTestData is the structured success payload for seal test --json.
+type sealTestData struct {
+	CurrentKey string               `json:"currentKey"`
+	Passed     bool                 `json:"passed"`
+	Results    []sealTestResultItem `json:"results"`
+}
+
+func (d sealTestData) RenderHuman(w io.Writer) error {
+	// Human mode: print conflicts so the user can see which paths are blocked.
+	for _, r := range d.Results {
+		if r.Status == "claimed-by-other-key" {
+			if _, err := fmt.Fprintf(w, "conflict: %q is claimed by %q\n", r.Path, *r.ClaimedBy); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// sealDoctorFinding is one integrity finding from seal doctor.
+type sealDoctorFinding struct {
+	Severity string  `json:"severity"`
+	Code     string  `json:"code"`
+	Path     *string `json:"path"`
+	Message  string  `json:"message"`
+}
+
+// sealDoctorSummary aggregates counts from a seal doctor inspection.
+type sealDoctorSummary struct {
+	CheckedClaims int `json:"checkedClaims"`
+	ErrorCount    int `json:"errorCount"`
+	WarningCount  int `json:"warningCount"`
+}
+
+// sealDoctorData is the structured success payload for seal doctor --json.
+type sealDoctorData struct {
+	Healthy  bool                `json:"healthy"`
+	Summary  sealDoctorSummary   `json:"summary"`
+	Findings []sealDoctorFinding `json:"findings"`
+}
+
+func (d sealDoctorData) RenderHuman(_ io.Writer) error {
+	// Human mode: print nothing on success; violations are reported as a
+	// CommandError by the caller so the renderer writes the message to stderr.
+	return nil
+}
+
+// currentKeyUnresolvedDetails is the error.details payload when current key
+// resolution fails for seal test --json.
+type currentKeyUnresolvedDetails struct {
+	Reason         string  `json:"reason"`
+	RepositoryRoot *string `json:"repositoryRoot"`
+	MetadataPath   *string `json:"metadataPath"`
 }
 
 const sealHelp = `Usage: git kura seal <subcommand> [args]
@@ -140,7 +251,7 @@ Current key:
   directory is not inside a managed worktree, or when that worktree's
   metadata is missing or inconsistent.`
 
-const sealTestHelp = `Usage: git kura seal test <path> [path...]
+const sealTestHelp = `Usage: git kura seal test [--json] <path> [path...]
 
 Check whether one or more paths may be handled in the current seal context.
 
@@ -158,6 +269,12 @@ path claimed by a different key is a conflict. seal test exits 0 only when every
 path is safe; if any path conflicts it exits with seal-conflict (code 6) and
 reports each conflicting path and the key that claims it.
 
+Flags:
+  --json   Print structured output as a JSON envelope. On conflict, exits 6 but
+           ok is true with data.passed false (conflict is a business result, not
+           an execution failure). Current key resolution failures produce an
+           ok:false envelope on stdout.
+
 Current key:
   The current key is derived from the git-kura managed worktree you are in:
   run this command from inside the worktree created by "git kura open <key>"
@@ -165,7 +282,7 @@ Current key:
   directory is not inside a managed worktree, or when that worktree's
   metadata is missing or inconsistent.`
 
-const sealDoctorHelp = `Usage: git kura seal doctor
+const sealDoctorHelp = `Usage: git kura seal doctor [--json]
 
 Validate the repository-wide path seal store.
 
@@ -177,7 +294,12 @@ on the current worktree or current seal key.
 An absent store is treated as an empty store. If the store is malformed or
 contains invalid paths, seal doctor exits with seal-doctor-error (code 7) and
 reports every problematic store entry it finds. On success it prints nothing
-and exits 0.`
+and exits 0.
+
+Flags:
+  --json   Print structured output as a JSON envelope. A malformed store
+           produces an ok:false envelope; integrity violations produce ok:true
+           with data.healthy false and data.findings listing each violation.`
 
 func runSeal(args []string) error {
 	if len(args) == 0 {
@@ -238,11 +360,11 @@ func runSealTest(args []string) error {
 		fmt.Println(sealTestHelp)
 		return nil
 	}
-	paths, err := parseSealTestArgs(args)
+	opts, paths, err := parseSealTestArgs(args)
 	if err != nil {
 		return err
 	}
-	return cmdSealTest(paths)
+	return cmdSealTest(opts, paths)
 }
 
 func runSealDoctor(args []string) error {
@@ -250,39 +372,47 @@ func runSealDoctor(args []string) error {
 		fmt.Println(sealDoctorHelp)
 		return nil
 	}
-	if err := parseSealDoctorArgs(args); err != nil {
+	opts, err := parseSealDoctorArgs(args)
+	if err != nil {
 		return err
 	}
-	return cmdSealDoctor()
+	return cmdSealDoctor(opts)
 }
 
-// parseSealTestArgs requires at least one positional path and rejects any
-// option. seal test is intentionally option-free in v0: the not-yet-defined
-// --all / --unsealed / --staged modes must error rather than be silently
-// ignored, so a future release can add them without changing behavior.
-func parseSealTestArgs(args []string) ([]string, error) {
+// parseSealTestArgs parses seal test arguments. --json must appear before the
+// path arguments. At least one path is required.
+func parseSealTestArgs(args []string) (sealTestOptions, []string, error) {
+	var opts sealTestOptions
+	if len(args) > 0 && args[0] == "--json" {
+		opts.JSON = true
+		args = args[1:]
+	}
 	if len(args) == 0 {
-		return nil, fmt.Errorf("usage: git kura seal test <path> [path...]")
+		return sealTestOptions{}, nil, fmt.Errorf("usage: git kura seal test [--json] <path> [path...]")
 	}
 	for _, a := range args {
 		if strings.HasPrefix(a, "-") {
-			return nil, fmt.Errorf("usage: git kura seal test <path> [path...]: unknown option %q", a)
+			return sealTestOptions{}, nil, fmt.Errorf("usage: git kura seal test [--json] <path> [path...]: unknown option %q", a)
 		}
 	}
-	return args, nil
+	return opts, args, nil
 }
 
-// parseSealDoctorArgs rejects every argument and option. doctor is
-// intentionally option-free in v0: future fix or formatting modes should be
-// added explicitly without silently accepting placeholder flags today.
-func parseSealDoctorArgs(args []string) error {
+// parseSealDoctorArgs parses seal doctor arguments. --json is the only
+// accepted flag; no positional arguments are accepted.
+func parseSealDoctorArgs(args []string) (sealDoctorOptions, error) {
+	var opts sealDoctorOptions
+	if len(args) > 0 && args[0] == "--json" {
+		opts.JSON = true
+		args = args[1:]
+	}
 	if len(args) == 0 {
-		return nil
+		return opts, nil
 	}
 	if strings.HasPrefix(args[0], "-") {
-		return exitCodeError(exitUsageError, fmt.Errorf("usage: git kura seal doctor: unknown option %q", args[0]))
+		return sealDoctorOptions{}, exitCodeError(exitUsageError, fmt.Errorf("usage: git kura seal doctor [--json]: unknown option %q", args[0]))
 	}
-	return exitCodeError(exitUsageError, fmt.Errorf("usage: git kura seal doctor: unexpected argument %q", args[0]))
+	return sealDoctorOptions{}, exitCodeError(exitUsageError, fmt.Errorf("usage: git kura seal doctor [--json]: unexpected argument %q", args[0]))
 }
 
 // parseSealLsArgs parses the argument list for seal ls. --json must appear
@@ -394,17 +524,77 @@ func sealLsFail(opts sealLsOptions, err error) error {
 // cmdSealDoctor validates the whole path seal store for the current Git
 // repository. It is repository-wide and read-only: it does not derive a current
 // key, inspect git-kura worktree metadata, or acquire paths.lock.
-func cmdSealDoctor() error {
+func cmdSealDoctor(opts sealDoctorOptions) error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
-		return fmt.Errorf("not inside a git repository")
+		return sealDoctorFail(opts, fmt.Errorf("not inside a git repository"))
 	}
 	storeFile, _, err := pathsSealStore(repoRoot)
 	if err != nil {
-		return err
+		return sealDoctorFail(opts, err)
 	}
-	if err := doctorSealStore(storeFile); err != nil {
-		return exitCodeError(exitSealDoctorError, fmt.Errorf("seal-doctor-error: %w", err))
+
+	inspection, err := inspectSealStore(storeFile)
+	if err != nil {
+		// Store could not be read/parsed: execution failure.
+		doctorErr := exitCodeError(exitSealDoctorError, fmt.Errorf("seal-doctor-error: %w", err))
+		return sealDoctorFail(opts, doctorErr)
+	}
+
+	errorCount := 0
+	warningCount := 0
+	for _, f := range inspection.findings {
+		if f.Severity == "error" {
+			errorCount++
+		} else {
+			warningCount++
+		}
+	}
+	findings := inspection.findings
+	if findings == nil {
+		findings = []sealDoctorFinding{}
+	}
+	data := sealDoctorData{
+		Healthy: len(inspection.findings) == 0,
+		Summary: sealDoctorSummary{
+			CheckedClaims: inspection.checkedClaims,
+			ErrorCount:    errorCount,
+			WarningCount:  warningCount,
+		},
+		Findings: findings,
+	}
+
+	if opts.JSON {
+		if err := validateData(sealDoctorDataSchema, data); err != nil {
+			return err
+		}
+		if err := emitResult(renderJSON, Result{Command: commandSealDoctor, Data: data}); err != nil {
+			return err
+		}
+		if !data.Healthy {
+			return &renderedError{code: exitSealDoctorError}
+		}
+		return nil
+	}
+
+	// Human mode: print nothing on success; report findings as an error on failure.
+	if !data.Healthy {
+		msgs := make([]string, len(inspection.findings))
+		for i, f := range inspection.findings {
+			msgs[i] = f.Message
+		}
+		return exitCodeError(exitSealDoctorError,
+			fmt.Errorf("seal-doctor-error: %s", strings.Join(msgs, "; ")))
 	}
 	return nil
+}
+
+// sealDoctorFail routes a seal doctor failure to the right output. JSON
+// requests render an ok:false envelope on stdout; plain requests keep the
+// existing error behavior.
+func sealDoctorFail(opts sealDoctorOptions, err error) error {
+	if !opts.JSON {
+		return err
+	}
+	return emitError(renderJSON, toCommandError(commandSealDoctor, err))
 }

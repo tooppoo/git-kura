@@ -760,7 +760,7 @@ func TestCanonicalStoredSealPath(t *testing.T) {
 func TestCmdSealDoctorOutsideRepoFails(t *testing.T) {
 	outside := t.TempDir()
 	withWorkingDir(t, outside, func() {
-		if err := cmdSealDoctor(); err == nil {
+		if err := cmdSealDoctor(sealDoctorOptions{}); err == nil {
 			t.Fatal("cmdSealDoctor outside repo error = nil, want error")
 		}
 	})
@@ -774,7 +774,7 @@ func TestCmdSealDoctorReturnsExitCode7ForIntegrityFailures(t *testing.T) {
 	})
 
 	withWorkingDir(t, repo, func() {
-		err := cmdSealDoctor()
+		err := cmdSealDoctor(sealDoctorOptions{})
 		if err == nil {
 			t.Fatal("cmdSealDoctor invalid store error = nil, want error")
 		}
@@ -1591,7 +1591,7 @@ func TestCmdSealTestUnsealedSucceedsInProcess(t *testing.T) {
 	wt := openManagedWorktree(t, repo, "key1")
 
 	withWorkingDir(t, wt, func() {
-		if err := cmdSealTest([]string{"tracked.txt"}); err != nil {
+		if err := cmdSealTest(sealTestOptions{}, []string{"tracked.txt"}); err != nil {
 			t.Fatalf("cmdSealTest on unsealed path: %v", err)
 		}
 	})
@@ -1605,7 +1605,7 @@ func TestCmdSealTestNonExistentPathSucceedsInProcess(t *testing.T) {
 	// A path inside the repository that does not exist is treated as unclaimed,
 	// so it can be checked before the file is created.
 	withWorkingDir(t, wt, func() {
-		if err := cmdSealTest([]string{"new-file.txt"}); err != nil {
+		if err := cmdSealTest(sealTestOptions{}, []string{"new-file.txt"}); err != nil {
 			t.Fatalf("cmdSealTest on non-existent in-repo path: %v", err)
 		}
 	})
@@ -1621,7 +1621,7 @@ func TestCmdSealTestCurrentKeySucceedsInProcess(t *testing.T) {
 			t.Fatalf("cmdSealClaim: %v", err)
 		}
 		// A path claimed by the current key is safe.
-		if err := cmdSealTest([]string{"tracked.txt"}); err != nil {
+		if err := cmdSealTest(sealTestOptions{}, []string{"tracked.txt"}); err != nil {
 			t.Fatalf("cmdSealTest on own claim: %v", err)
 		}
 	})
@@ -1640,7 +1640,7 @@ func TestCmdSealTestRejectsDifferentKeyInProcess(t *testing.T) {
 	})
 
 	withWorkingDir(t, wt2, func() {
-		err := cmdSealTest([]string{"tracked.txt"})
+		err := cmdSealTest(sealTestOptions{}, []string{"tracked.txt"})
 		if err == nil {
 			t.Fatal("expected conflict error for path claimed by different key, got nil")
 		}
@@ -1679,7 +1679,7 @@ func TestCmdSealTestReportsAllConflictsInProcess(t *testing.T) {
 	// key3 tests all three: third.txt is safe, but the two foreign claims must
 	// both be reported with the keys that hold them.
 	withWorkingDir(t, wt3, func() {
-		err := cmdSealTest([]string{"tracked.txt", "second.txt", "third.txt"})
+		err := cmdSealTest(sealTestOptions{}, []string{"tracked.txt", "second.txt", "third.txt"})
 		if err == nil {
 			t.Fatal("expected conflict error, got nil")
 		}
@@ -1697,7 +1697,7 @@ func TestCmdSealTestDoesNotMutateStoreInProcess(t *testing.T) {
 	wt := openManagedWorktree(t, repo, "key1")
 
 	withWorkingDir(t, wt, func() {
-		if err := cmdSealTest([]string{"tracked.txt"}); err != nil {
+		if err := cmdSealTest(sealTestOptions{}, []string{"tracked.txt"}); err != nil {
 			t.Fatalf("cmdSealTest: %v", err)
 		}
 	})
@@ -1718,7 +1718,7 @@ func TestCmdSealTestOutsideRepoPathInProcess(t *testing.T) {
 	wt := openManagedWorktree(t, repo, "key1")
 
 	withWorkingDir(t, wt, func() {
-		if err := cmdSealTest([]string{"../outside.txt"}); err == nil {
+		if err := cmdSealTest(sealTestOptions{}, []string{"../outside.txt"}); err == nil {
 			t.Fatal("expected error for path outside repo, got nil")
 		}
 	})
@@ -1731,7 +1731,7 @@ func TestCmdSealTestFailsOutsideManagedWorktreeInProcess(t *testing.T) {
 	// The main checkout is a git repo but not a managed worktree: the context
 	// error must be distinct from a seal-conflict.
 	withWorkingDir(t, repo, func() {
-		err := cmdSealTest([]string{"tracked.txt"})
+		err := cmdSealTest(sealTestOptions{}, []string{"tracked.txt"})
 		if err == nil {
 			t.Fatal("expected error outside a managed worktree, got nil")
 		}
@@ -1967,5 +1967,402 @@ func TestRunLsJSONInProcess(t *testing.T) {
 	}
 	if !strings.Contains(out, `"keys"`) {
 		t.Fatalf("ls --json output = %q, want keys field", out)
+	}
+}
+
+// --- RenderHuman direct tests ---
+
+func TestSealTestDataRenderHumanPrintsConflicts(t *testing.T) {
+	claimedBy := "key2"
+	data := sealTestData{
+		CurrentKey: "key1",
+		Passed:     false,
+		Results: []sealTestResultItem{
+			{Path: "safe.go", Status: "claimed-by-current-key", Safe: true, ClaimedBy: &claimedBy},
+			{Path: "conflict.go", Status: "claimed-by-other-key", Safe: false, ClaimedBy: &claimedBy},
+			{Path: "free.go", Status: "unclaimed", Safe: true},
+		},
+	}
+	var sb strings.Builder
+	if err := data.RenderHuman(&sb); err != nil {
+		t.Fatalf("RenderHuman error: %v", err)
+	}
+	got := sb.String()
+	if !strings.Contains(got, "conflict.go") {
+		t.Fatalf("expected conflict.go in RenderHuman output, got: %q", got)
+	}
+	if strings.Contains(got, "safe.go") || strings.Contains(got, "free.go") {
+		t.Fatalf("unexpected non-conflict paths in RenderHuman output: %q", got)
+	}
+}
+
+func TestSealDoctorDataRenderHumanIsNoop(t *testing.T) {
+	data := sealDoctorData{
+		Healthy:  false,
+		Summary:  sealDoctorSummary{CheckedClaims: 1, ErrorCount: 1},
+		Findings: []sealDoctorFinding{{Severity: "error", Code: "invalid-stored-path", Message: "bad"}},
+	}
+	var sb strings.Builder
+	if err := data.RenderHuman(&sb); err != nil {
+		t.Fatalf("RenderHuman error: %v", err)
+	}
+	if sb.String() != "" {
+		t.Fatalf("sealDoctorData.RenderHuman should be no-op, got: %q", sb.String())
+	}
+}
+
+// --- parseSealTestArgs / parseSealDoctorArgs error paths ---
+
+func TestParseSealTestArgsJSONFlag(t *testing.T) {
+	opts, paths, err := parseSealTestArgs([]string{"--json", "path.go"})
+	if err != nil {
+		t.Fatalf("parseSealTestArgs --json: %v", err)
+	}
+	if !opts.JSON {
+		t.Fatal("opts.JSON = false, want true")
+	}
+	if len(paths) != 1 || paths[0] != "path.go" {
+		t.Fatalf("paths = %v, want [path.go]", paths)
+	}
+}
+
+func TestParseSealTestArgsUnknownFlagIsError(t *testing.T) {
+	_, _, err := parseSealTestArgs([]string{"path.go", "--unknown"})
+	if err == nil {
+		t.Fatal("parseSealTestArgs with unknown flag: error = nil, want non-nil")
+	}
+}
+
+func TestParseSealDoctorArgsJSONFlag(t *testing.T) {
+	opts, err := parseSealDoctorArgs([]string{"--json"})
+	if err != nil {
+		t.Fatalf("parseSealDoctorArgs --json: %v", err)
+	}
+	if !opts.JSON {
+		t.Fatal("opts.JSON = false, want true")
+	}
+}
+
+func TestParseSealDoctorArgsUnknownFlagIsUsageError(t *testing.T) {
+	_, err := parseSealDoctorArgs([]string{"--unknown"})
+	if err == nil {
+		t.Fatal("parseSealDoctorArgs with unknown flag: error = nil, want non-nil")
+	}
+	var xe *exitError
+	if !errors.As(err, &xe) || xe.code != exitUsageError {
+		t.Fatalf("parseSealDoctorArgs unknown flag: expected usage error, got: %v", err)
+	}
+}
+
+func TestParseSealDoctorArgsUnexpectedArgIsUsageError(t *testing.T) {
+	_, err := parseSealDoctorArgs([]string{"unexpected"})
+	if err == nil {
+		t.Fatal("parseSealDoctorArgs with unexpected arg: error = nil, want non-nil")
+	}
+	var xe *exitError
+	if !errors.As(err, &xe) || xe.code != exitUsageError {
+		t.Fatalf("parseSealDoctorArgs unexpected arg: expected usage error, got: %v", err)
+	}
+}
+
+// --- sealTestFail / sealDoctorFail JSON mode ---
+
+func TestSealTestFailJSONEmitsErrorEnvelope(t *testing.T) {
+	out, err := captureStdout(t, func() error {
+		return sealTestFail(sealTestOptions{JSON: true}, fmt.Errorf("test-error"))
+	})
+	if err == nil {
+		t.Fatal("sealTestFail JSON mode: error = nil, want non-nil")
+	}
+	if !strings.Contains(out, `"ok":false`) {
+		t.Fatalf("sealTestFail JSON mode: expected ok:false in output, got: %q", out)
+	}
+}
+
+func TestSealDoctorFailJSONEmitsErrorEnvelope(t *testing.T) {
+	out, err := captureStdout(t, func() error {
+		return sealDoctorFail(sealDoctorOptions{JSON: true}, fmt.Errorf("test-error"))
+	})
+	if err == nil {
+		t.Fatal("sealDoctorFail JSON mode: error = nil, want non-nil")
+	}
+	if !strings.Contains(out, `"ok":false`) {
+		t.Fatalf("sealDoctorFail JSON mode: expected ok:false in output, got: %q", out)
+	}
+}
+
+// --- classifyCurrentKeyError branches ---
+
+func TestClassifyCurrentKeyErrorNotInsideGitRepository(t *testing.T) {
+	err := fmt.Errorf("not inside a git repository")
+	reason, meta := classifyCurrentKeyError(err, "")
+	if reason != "not-inside-git-repository" {
+		t.Fatalf("reason = %q, want not-inside-git-repository", reason)
+	}
+	if meta != nil {
+		t.Fatalf("meta = %v, want nil", meta)
+	}
+}
+
+func TestClassifyCurrentKeyErrorNotInManagedWorktree(t *testing.T) {
+	err := fmt.Errorf("current directory is not inside a git-kura managed worktree")
+	reason, meta := classifyCurrentKeyError(err, t.TempDir())
+	if reason != "not-in-managed-worktree" {
+		t.Fatalf("reason = %q, want not-in-managed-worktree", reason)
+	}
+	if meta != nil {
+		t.Fatalf("meta = %v, want nil", meta)
+	}
+}
+
+func TestClassifyCurrentKeyErrorMetadataMissing(t *testing.T) {
+	err := fmt.Errorf("directory /tmp/x has no git-kura metadata")
+	reason, _ := classifyCurrentKeyError(err, t.TempDir())
+	if reason != "metadata-missing" {
+		t.Fatalf("reason = %q, want metadata-missing", reason)
+	}
+}
+
+func TestClassifyCurrentKeyErrorMetadataInconsistent(t *testing.T) {
+	err := fmt.Errorf("some unrecognized worktree error")
+	reason, meta := classifyCurrentKeyError(err, t.TempDir())
+	if reason != "metadata-inconsistent" {
+		t.Fatalf("reason = %q, want metadata-inconsistent", reason)
+	}
+	if meta != nil {
+		t.Fatalf("meta = %v, want nil", meta)
+	}
+}
+
+// --- tryResolveWorktreeMetadataPath ---
+
+func TestTryResolveWorktreeMetadataPathNonGitDirReturnsEmpty(t *testing.T) {
+	result := tryResolveWorktreeMetadataPath(t.TempDir())
+	if result != "" {
+		t.Fatalf("tryResolveWorktreeMetadataPath non-git dir = %q, want empty", result)
+	}
+}
+
+func TestTryResolveWorktreeMetadataPathFromRepoRootReturnsEmpty(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	// The repo root is not under the kura worktrees dir, so the result is empty.
+	result := tryResolveWorktreeMetadataPath(repo)
+	if result != "" {
+		t.Fatalf("tryResolveWorktreeMetadataPath from repo root = %q, want empty", result)
+	}
+}
+
+// --- cmdSealDoctor JSON mode in-process ---
+
+func TestCmdSealDoctorJSONHealthyInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	var out string
+	withWorkingDir(t, repo, func() {
+		var err error
+		out, err = captureStdout(t, func() error {
+			return cmdSealDoctor(sealDoctorOptions{JSON: true})
+		})
+		if err != nil {
+			t.Fatalf("cmdSealDoctor JSON healthy: %v", err)
+		}
+	})
+	if !strings.Contains(out, `"ok":true`) {
+		t.Fatalf("expected ok:true, got: %q", out)
+	}
+	if !strings.Contains(out, `"healthy":true`) {
+		t.Fatalf("expected healthy:true, got: %q", out)
+	}
+}
+
+func TestCmdSealDoctorJSONIntegrityViolationInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	seedSealStore(t, repo, map[string]sealEntry{
+		`src/./a.go`: {Key: "key1"},
+	})
+
+	var out string
+	withWorkingDir(t, repo, func() {
+		var err error
+		out, err = captureStdout(t, func() error {
+			return cmdSealDoctor(sealDoctorOptions{JSON: true})
+		})
+		if err == nil {
+			t.Fatal("expected error for integrity violation, got nil")
+		}
+		var re *renderedError
+		if !errors.As(err, &re) || re.code != exitSealDoctorError {
+			t.Fatalf("expected renderedError with exitSealDoctorError, got: %v", err)
+		}
+	})
+	if !strings.Contains(out, `"healthy":false`) {
+		t.Fatalf("expected healthy:false, got: %q", out)
+	}
+}
+
+func TestCmdSealDoctorJSONMalformedStoreInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	storeFile, _, err := pathsSealStore(repo)
+	if err != nil {
+		t.Fatalf("pathsSealStore: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(storeFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(storeFile, []byte(`{invalid`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out string
+	withWorkingDir(t, repo, func() {
+		out, err = captureStdout(t, func() error {
+			return cmdSealDoctor(sealDoctorOptions{JSON: true})
+		})
+		if err == nil {
+			t.Fatal("expected error for malformed store, got nil")
+		}
+	})
+	if !strings.Contains(out, `"ok":false`) {
+		t.Fatalf("expected ok:false, got: %q", out)
+	}
+}
+
+// --- cmdSealTest JSON mode in-process ---
+
+func TestCmdSealTestJSONPassedInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
+
+	var out string
+	withWorkingDir(t, wt, func() {
+		var err error
+		out, err = captureStdout(t, func() error {
+			return cmdSealTest(sealTestOptions{JSON: true}, []string{"tracked.txt"})
+		})
+		if err != nil {
+			t.Fatalf("cmdSealTest JSON passed: %v", err)
+		}
+	})
+	if !strings.Contains(out, `"passed":true`) {
+		t.Fatalf("expected passed:true, got: %q", out)
+	}
+	if !strings.Contains(out, `"ok":true`) {
+		t.Fatalf("expected ok:true, got: %q", out)
+	}
+}
+
+func TestCmdSealTestJSONConflictInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt1 := openManagedWorktree(t, repo, "key1")
+	wt2 := openManagedWorktree(t, repo, "key2")
+
+	withWorkingDir(t, wt1, func() {
+		if err := cmdSealClaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim: %v", err)
+		}
+	})
+
+	var out string
+	withWorkingDir(t, wt2, func() {
+		var err error
+		out, err = captureStdout(t, func() error {
+			return cmdSealTest(sealTestOptions{JSON: true}, []string{"tracked.txt"})
+		})
+		if err == nil {
+			t.Fatal("expected error for conflict, got nil")
+		}
+		var re *renderedError
+		if !errors.As(err, &re) || re.code != exitSealConflict {
+			t.Fatalf("expected renderedError with exitSealConflict, got: %v", err)
+		}
+	})
+	if !strings.Contains(out, `"passed":false`) {
+		t.Fatalf("expected passed:false, got: %q", out)
+	}
+}
+
+func TestCmdSealTestJSONCurrentKeyUnresolvedInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	var out string
+	withWorkingDir(t, repo, func() {
+		var err error
+		out, err = captureStdout(t, func() error {
+			return cmdSealTest(sealTestOptions{JSON: true}, []string{"tracked.txt"})
+		})
+		if err == nil {
+			t.Fatal("expected error outside managed worktree, got nil")
+		}
+	})
+	if !strings.Contains(out, `"current-key-unresolved"`) {
+		t.Fatalf("expected current-key-unresolved in output, got: %q", out)
+	}
+}
+
+func TestCmdSealTestJSONCurrentKeyUnresolvedOutsideGitInProcess(t *testing.T) {
+	outside := t.TempDir()
+
+	var out string
+	withWorkingDir(t, outside, func() {
+		var err error
+		out, err = captureStdout(t, func() error {
+			return cmdSealTest(sealTestOptions{JSON: true}, []string{"any.txt"})
+		})
+		if err == nil {
+			t.Fatal("expected error outside git repo, got nil")
+		}
+	})
+	if !strings.Contains(out, `"current-key-unresolved"`) {
+		t.Fatalf("expected current-key-unresolved in output, got: %q", out)
+	}
+	if !strings.Contains(out, `"not-inside-git-repository"`) {
+		t.Fatalf("expected not-inside-git-repository reason, got: %q", out)
+	}
+}
+
+func TestCmdSealTestJSONConflictForMissingFileInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt1 := openManagedWorktree(t, repo, "key1")
+	wt2 := openManagedWorktree(t, repo, "key2")
+
+	withWorkingDir(t, wt1, func() {
+		if err := cmdSealClaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim: %v", err)
+		}
+	})
+
+	// Delete the file — it is still claimed by key1 in the store.
+	if err := os.Remove(filepath.Join(repo, "tracked.txt")); err != nil {
+		t.Fatalf("remove tracked.txt: %v", err)
+	}
+
+	var out string
+	withWorkingDir(t, wt2, func() {
+		var err error
+		out, err = captureStdout(t, func() error {
+			return cmdSealTest(sealTestOptions{JSON: true}, []string{"tracked.txt"})
+		})
+		if err == nil {
+			t.Fatal("expected conflict error for missing-but-claimed file, got nil")
+		}
+		var re *renderedError
+		if !errors.As(err, &re) || re.code != exitSealConflict {
+			t.Fatalf("expected exitSealConflict, got: %v", err)
+		}
+	})
+	if !strings.Contains(out, `"passed":false`) {
+		t.Fatalf("expected passed:false for claimed-by-other-key even when file missing, got: %q", out)
+	}
+	if !strings.Contains(out, `"claimed-by-other-key"`) {
+		t.Fatalf("expected claimed-by-other-key status, got: %q", out)
 	}
 }
