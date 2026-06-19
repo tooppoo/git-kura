@@ -1908,3 +1908,64 @@ func TestParseSealLsArgsUnknownOptionIsUsageError(t *testing.T) {
 		})
 	}
 }
+
+func TestParseSealLsArgsExtraArgAfterKeyIsUsageError(t *testing.T) {
+	_, err := parseSealLsArgs([]string{"--json", "key1", "extra"})
+	if err == nil {
+		t.Fatal("parseSealLsArgs([--json key1 extra]) error = nil, want usage error")
+	}
+	var xe *exitError
+	if !errors.As(err, &xe) || xe.code != exitUsageError {
+		t.Fatalf("expected exitUsageError, got: %v", err)
+	}
+}
+
+func TestRunSealLsJSONInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
+
+	withWorkingDir(t, wt, func() {
+		if err := run([]string{"seal", "claim", "tracked.txt"}); err != nil {
+			t.Fatalf("seal claim: %v", err)
+		}
+	})
+
+	var out string
+	withWorkingDir(t, repo, func() {
+		var err error
+		out, err = captureStdout(t, func() error { return run([]string{"seal", "ls", "--json"}) })
+		if err != nil {
+			t.Fatalf("seal ls --json: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, `"ok":true`) {
+		t.Fatalf("seal ls --json output = %q, want ok:true envelope", out)
+	}
+	if !strings.Contains(out, `"filterKey":null`) {
+		t.Fatalf("seal ls --json output = %q, want filterKey:null", out)
+	}
+}
+
+func TestRunLsJSONInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	openManagedWorktree(t, repo, "key1")
+
+	var out string
+	withWorkingDir(t, repo, func() {
+		var err error
+		out, err = captureStdout(t, func() error { return run([]string{"ls", "--json"}) })
+		if err != nil {
+			t.Fatalf("ls --json: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, `"ok":true`) {
+		t.Fatalf("ls --json output = %q, want ok:true envelope", out)
+	}
+	if !strings.Contains(out, `"keys"`) {
+		t.Fatalf("ls --json output = %q, want keys field", out)
+	}
+}
