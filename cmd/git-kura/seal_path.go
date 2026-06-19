@@ -174,10 +174,19 @@ func readSealStore(path string) (sealPathStore, error) {
 	return store, nil
 }
 
-func doctorSealStore(storePath string) error {
+// sealStoreInspection holds the structured result of a successful store inspection.
+type sealStoreInspection struct {
+	checkedClaims int
+	findings      []sealDoctorFinding
+}
+
+// inspectSealStore reads the seal store at storePath and returns structured
+// findings. An error is returned only when the store cannot be read or parsed
+// (malformed store); integrity violations are returned as findings.
+func inspectSealStore(storePath string) (sealStoreInspection, error) {
 	store, err := readSealStore(storePath)
 	if err != nil {
-		return err
+		return sealStoreInspection{}, err
 	}
 
 	rawPaths := make([]string, 0, len(store.Paths))
@@ -190,37 +199,70 @@ func doctorSealStore(storePath string) error {
 	// a well-formed, repository-relative location that stays inside the repo;
 	// no two entries collapse to the same canonical path; and every path is
 	// already stored in its canonical (normalized) form. Every violation found
-	// in a single pass is collected and reported together, so the caller sees
-	// all problems at once rather than fixing and re-running one at a time.
-	var violations []error
+	// in a single pass is collected and reported together.
+	var findings []sealDoctorFinding
 	seen := make(map[string]string, len(rawPaths))
 	for _, rawPath := range rawPaths {
+		p := rawPath // local copy for pointer safety
 		entry := store.Paths[rawPath]
 
-		canonical, err := canonicalStoredSealPath(rawPath)
-		if err != nil {
-			// Without a canonical form the duplication and normalization checks
-			// below are meaningless for this entry, so record it and move on.
-			violations = append(violations, err)
+		canonical, canonErr := canonicalStoredSealPath(rawPath)
+		if canonErr != nil {
+			findings = append(findings, sealDoctorFinding{
+				Severity: "error",
+				Code:     "invalid-stored-path",
+				Path:     &p,
+				Message:  canonErr.Error(),
+			})
 			continue
 		}
 		if firstRawPath, ok := seen[canonical]; ok {
 			firstKey := store.Paths[firstRawPath].Key
+			var msg string
 			if firstKey != entry.Key {
-				violations = append(violations, fmt.Errorf("store entries %q (key %q) and %q (key %q) refer to the same canonical path %q",
-					firstRawPath, firstKey, rawPath, entry.Key, canonical))
+				msg = fmt.Sprintf("store entries %q (key %q) and %q (key %q) refer to the same canonical path %q",
+					firstRawPath, firstKey, rawPath, entry.Key, canonical)
 			} else {
-				violations = append(violations, fmt.Errorf("store entries %q and %q duplicate canonical path %q", firstRawPath, rawPath, canonical))
+				msg = fmt.Sprintf("store entries %q and %q duplicate canonical path %q", firstRawPath, rawPath, canonical)
 			}
+			findings = append(findings, sealDoctorFinding{
+				Severity: "error",
+				Code:     "duplicate-canonical-path",
+				Path:     &p,
+				Message:  msg,
+			})
 			continue
 		}
 		seen[canonical] = rawPath
 		if canonical != rawPath {
-			violations = append(violations, fmt.Errorf("store entry %q is not normalized; canonical path is %q", rawPath, canonical))
+			findings = append(findings, sealDoctorFinding{
+				Severity: "error",
+				Code:     "non-normalized-path",
+				Path:     &p,
+				Message:  fmt.Sprintf("store entry %q is not normalized; canonical path is %q", rawPath, canonical),
+			})
 		}
 	}
 
-	return errors.Join(violations...)
+	return sealStoreInspection{
+		checkedClaims: len(rawPaths),
+		findings:      findings,
+	}, nil
+}
+
+// doctorSealStore is a backward-compatible wrapper over inspectSealStore that
+// returns an error listing all integrity violations, or nil when the store is
+// healthy. A store-read failure is returned directly.
+func doctorSealStore(storePath string) error {
+	inspection, err := inspectSealStore(storePath)
+	if err != nil {
+		return err
+	}
+	errs := make([]error, 0, len(inspection.findings))
+	for _, f := range inspection.findings {
+		errs = append(errs, fmt.Errorf("%s", f.Message))
+	}
+	return errors.Join(errs...)
 }
 
 func canonicalStoredSealPath(rawPath string) (string, error) {
@@ -498,58 +540,176 @@ func cmdSealUnclaim(rawPaths []string) error {
 // current seal context without modifying the store. It is read-only and does
 // not take paths.lock, so a held lock never blocks it (mirroring cmdSealLs).
 //
-// A path is safe when it is unclaimed or already claimed by the current key.
-// A path inside the repository that does not exist yet is treated as
-// unclaimed, so the check can be run before creating a new file. A path
-// claimed by a different key is a conflict; all conflicts are collected so the
-// error reports every conflicting path with the key that claims it. Failure to
-// derive the current key (running outside a managed worktree, or with missing
-// or inconsistent metadata) is reported as a context error distinct from the
-// seal-conflict error.
-func cmdSealTest(rawPaths []string) error {
-	key, err := readSealContext()
+// In JSON mode, a conflict is a business result: ok is true with
+// data.passed false, and exit code 6 is still used. Execution failures
+// (current key unresolved, invalid path) produce ok:false envelopes.
+func cmdSealTest(opts sealTestOptions, rawPaths []string) error {
+	repoTop, err := gitutil.RepoRoot()
 	if err != nil {
-		return err
+		return sealTestFail(opts, fmt.Errorf("current-key-unresolved: not inside a git repository"))
 	}
 
-	repoRoot, err := gitutil.RepoRoot()
-	if err != nil {
-		return fmt.Errorf("not inside a git repository")
+	key, keyErr := worktree.CurrentKey(repoTop)
+	if keyErr != nil {
+		return sealTestCurrentKeyFail(opts, keyErr, repoTop)
 	}
 
-	storeFile, _, err := pathsSealStore(repoRoot)
+	storeFile, _, err := pathsSealStore(repoTop)
 	if err != nil {
-		return err
+		return sealTestFail(opts, err)
 	}
-
 	store, err := readSealStore(storeFile)
 	if err != nil {
-		return err
+		return sealTestFail(opts, err)
 	}
 
-	var conflicts []sealConflict
+	results := make([]sealTestResultItem, 0, len(rawPaths))
 	for _, rawPath := range rawPaths {
-		relPath, err := normalizeSealPath(repoRoot, rawPath)
-		if err != nil {
-			return err
+		relPath, normErr := normalizeSealPath(repoTop, rawPath)
+		if normErr != nil {
+			// Absolute / repo-external / non-normalizable path: input contract violation.
+			return sealTestFail(opts, normErr)
 		}
 		storeKey := filepath.ToSlash(relPath)
 
+		_, statErr := os.Stat(filepath.Join(repoTop, relPath))
+		fileExists := statErr == nil
+
 		entry, sealed := store.Paths[storeKey]
-		if !sealed {
-			// Unclaimed (including not-yet-created paths) is safe.
-			continue
+
+		var item sealTestResultItem
+		item.Path = storeKey
+		switch {
+		case !fileExists:
+			item.Status = "missing-path"
+			item.Safe = true
+			item.ClaimedBy = nil
+		case !sealed:
+			item.Status = "unclaimed"
+			item.Safe = true
+			item.ClaimedBy = nil
+		case entry.Key == key:
+			k := key
+			item.Status = "claimed-by-current-key"
+			item.Safe = true
+			item.ClaimedBy = &k
+		default:
+			k := entry.Key
+			item.Status = "claimed-by-other-key"
+			item.Safe = false
+			item.ClaimedBy = &k
 		}
-		if entry.Key != key {
-			conflicts = append(conflicts, sealConflict{path: rawPath, sealedBy: entry.Key})
-		}
-		// Claimed by the current key: safe.
+		results = append(results, item)
 	}
 
-	if len(conflicts) > 0 {
+	passed := true
+	for _, r := range results {
+		if r.Status == "claimed-by-other-key" {
+			passed = false
+			break
+		}
+	}
+
+	data := sealTestData{
+		CurrentKey: key,
+		Passed:     passed,
+		Results:    results,
+	}
+
+	if opts.JSON {
+		if err := validateData(sealTestDataSchema, data); err != nil {
+			return err
+		}
+		if err := emitResult(renderJSON, Result{Command: commandSealTest, Data: data}); err != nil {
+			return err
+		}
+		if !passed {
+			// Conflict is a business result in JSON mode: ok:true but exit 6.
+			return &renderedError{code: exitSealConflict}
+		}
+		return nil
+	}
+
+	// Human mode: conflict → existing exit-6 error path.
+	if !passed {
+		var conflicts []sealConflict
+		for _, r := range results {
+			if r.Status == "claimed-by-other-key" {
+				conflicts = append(conflicts, sealConflict{path: r.Path, sealedBy: *r.ClaimedBy})
+			}
+		}
 		return sealConflictError(conflicts)
 	}
 	return nil
+}
+
+// sealTestFail routes a seal test execution failure to the right output.
+// JSON requests render an ok:false envelope on stdout; plain requests keep the
+// existing error behavior.
+func sealTestFail(opts sealTestOptions, err error) error {
+	if !opts.JSON {
+		return err
+	}
+	return emitError(renderJSON, toCommandError(commandSealTest, err))
+}
+
+// sealTestCurrentKeyFail handles the current-key-unresolved failure for seal
+// test. In JSON mode it produces a structured ok:false envelope with reason
+// details; in human mode it returns a plain error with the current-key-unresolved
+// token in the message.
+func sealTestCurrentKeyFail(opts sealTestOptions, keyErr error, repoTop string) error {
+	reason, metaPath := classifyCurrentKeyError(keyErr, repoTop)
+	msg := fmt.Sprintf("current-key-unresolved: %s", keyErr.Error())
+
+	if !opts.JSON {
+		return fmt.Errorf("%s", msg)
+	}
+
+	repoTopCopy := repoTop
+	cerr := &CommandError{
+		Command:  commandSealTest,
+		Code:     "current-key-unresolved",
+		Message:  msg,
+		ExitCode: exitGeneralError,
+		Details: currentKeyUnresolvedDetails{
+			Reason:         reason,
+			RepositoryRoot: &repoTopCopy,
+			MetadataPath:   metaPath,
+		},
+	}
+	return emitError(renderJSON, cerr)
+}
+
+// classifyCurrentKeyError derives the structured reason token from a
+// worktree.CurrentKey failure by pattern-matching the error message.
+func classifyCurrentKeyError(err error, repoTop string) (reason string, metaPath *string) {
+	msg := err.Error()
+	if strings.Contains(msg, "not inside a git-kura managed worktree") {
+		return "not-in-managed-worktree", nil
+	}
+	if strings.Contains(msg, "has no git-kura metadata") {
+		if mp := tryResolveWorktreeMetadataPath(repoTop); mp != "" {
+			return "metadata-missing", &mp
+		}
+		return "metadata-missing", nil
+	}
+	return "metadata-inconsistent", nil
+}
+
+// tryResolveWorktreeMetadataPath attempts to compute the expected metadata
+// file path for the managed worktree rooted at repoTop.
+func tryResolveWorktreeMetadataPath(repoTop string) string {
+	commonDir, err := gitutil.CommonDir(repoTop)
+	if err != nil {
+		return ""
+	}
+	stateDir := filepath.Join(commonDir, "kura")
+	worktreesDir := filepath.Join(stateDir, "worktrees")
+	rel, err := filepath.Rel(worktreesDir, repoTop)
+	if err != nil || strings.ContainsRune(rel, filepath.Separator) || rel == "." || rel == ".." {
+		return ""
+	}
+	return worktree.MetadataPathInStateDir(stateDir, rel)
 }
 
 // sealKeyNone is the sentinel "current key" used when a seal decision runs in a

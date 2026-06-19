@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/cmd/git-kura/schema/commands/seal_doctor.schema.json",
+  "title": "git kura seal doctor — envelope data",
+  "description": "Command-specific schema for the data payload of `git kura seal doctor --json`, nested under the common envelope's data field.",
+  "type": "object",
+  "required": ["healthy", "summary", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "healthy": {
+      "type": "boolean",
+      "description": "True when no integrity violations were found in the seal store."
+    },
+    "summary": {
+      "$ref": "#/$defs/summary",
+      "description": "Aggregate counts from the inspection."
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" },
+      "description": "Integrity violations found during inspection, in deterministic order."
+    }
+  },
+  "$defs": {
+    "summary": {
+      "type": "object",
+      "required": ["checkedClaims", "errorCount", "warningCount"],
+      "additionalProperties": false,
+      "properties": {
+        "checkedClaims": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of claim entries inspected."
+        },
+        "errorCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of findings with severity error."
+        },
+        "warningCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of findings with severity warning."
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "required": ["severity", "code", "path", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "severity": {
+          "type": "string",
+          "enum": ["error", "warning"],
+          "description": "Severity of this finding."
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Stable hyphen-case token identifying the finding type."
+        },
+        "path": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ],
+          "description": "The affected store path, or null for repository-wide findings."
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable description of the finding."
+        }
+      }
+    }
+  }
+}

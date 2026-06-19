@@ -1703,3 +1703,307 @@ func TestSealLsJSONConformsToEnvelopeSchema(t *testing.T) {
 	requireExitCode(t, result, 0)
 	requireConformsToEnvelopeSchema(t, result.stdout)
 }
+
+// --- seal test --json integration tests ---
+
+func TestSealTestJSONAllPassed(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "key1")
+
+	requireExitCode(t, cli.gitKura(wt, "seal", "claim", "tracked.txt"), 0)
+
+	// tracked.txt claimed by current key, new-file.txt missing: both safe.
+	result := cli.gitKura(wt, "seal", "test", "--json", "tracked.txt", "new-file.txt")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.test", sealTestDataSchema)
+	if data["passed"] != true {
+		t.Fatalf("passed = %v, want true", data["passed"])
+	}
+	if data["currentKey"] != "key1" {
+		t.Fatalf("currentKey = %v, want key1", data["currentKey"])
+	}
+	results, ok := data["results"].([]any)
+	if !ok || len(results) != 2 {
+		t.Fatalf("results = %v, want 2 entries", data["results"])
+	}
+	r0 := results[0].(map[string]any)
+	r1 := results[1].(map[string]any)
+	if r0["status"] != "claimed-by-current-key" {
+		t.Fatalf("results[0].status = %v, want claimed-by-current-key", r0["status"])
+	}
+	if r0["safe"] != true {
+		t.Fatalf("results[0].safe = %v, want true", r0["safe"])
+	}
+	if r0["claimedBy"] != "key1" {
+		t.Fatalf("results[0].claimedBy = %v, want key1", r0["claimedBy"])
+	}
+	if r1["status"] != "missing-path" {
+		t.Fatalf("results[1].status = %v, want missing-path", r1["status"])
+	}
+	if r1["safe"] != true {
+		t.Fatalf("results[1].safe = %v, want true", r1["safe"])
+	}
+	if r1["claimedBy"] != nil {
+		t.Fatalf("results[1].claimedBy = %v, want null", r1["claimedBy"])
+	}
+}
+
+func TestSealTestJSONConflictByOtherKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt1 := cli.openWorktree(t, repo, "key1")
+	wt2 := cli.openWorktree(t, repo, "key2")
+
+	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "tracked.txt"), 0)
+
+	result := cli.gitKura(wt2, "seal", "test", "--json", "tracked.txt")
+	// Conflict is a business result: ok:true but exit 6.
+	requireExitCode(t, result, exitSealConflict)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.test", sealTestDataSchema)
+	if data["passed"] != false {
+		t.Fatalf("passed = %v, want false", data["passed"])
+	}
+	results, ok := data["results"].([]any)
+	if !ok || len(results) != 1 {
+		t.Fatalf("results = %v, want 1 entry", data["results"])
+	}
+	r0 := results[0].(map[string]any)
+	if r0["status"] != "claimed-by-other-key" {
+		t.Fatalf("results[0].status = %v, want claimed-by-other-key", r0["status"])
+	}
+	if r0["safe"] != false {
+		t.Fatalf("results[0].safe = %v, want false", r0["safe"])
+	}
+	if r0["claimedBy"] != "key1" {
+		t.Fatalf("results[0].claimedBy = %v, want key1", r0["claimedBy"])
+	}
+}
+
+func TestSealTestJSONUnclaimed(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "key1")
+
+	result := cli.gitKura(wt, "seal", "test", "--json", "tracked.txt")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.test", sealTestDataSchema)
+	results, ok := data["results"].([]any)
+	if !ok || len(results) != 1 {
+		t.Fatalf("results = %v, want 1 entry", data["results"])
+	}
+	r0 := results[0].(map[string]any)
+	if r0["status"] != "unclaimed" {
+		t.Fatalf("results[0].status = %v, want unclaimed", r0["status"])
+	}
+	if r0["safe"] != true {
+		t.Fatalf("results[0].safe = %v, want true", r0["safe"])
+	}
+	if r0["claimedBy"] != nil {
+		t.Fatalf("results[0].claimedBy = %v, want null", r0["claimedBy"])
+	}
+}
+
+func TestSealTestJSONMissingPath(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "key1")
+
+	result := cli.gitKura(wt, "seal", "test", "--json", "new-file.txt")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.test", sealTestDataSchema)
+	results, ok := data["results"].([]any)
+	if !ok || len(results) != 1 {
+		t.Fatalf("results = %v, want 1 entry", data["results"])
+	}
+	r0 := results[0].(map[string]any)
+	if r0["status"] != "missing-path" {
+		t.Fatalf("results[0].status = %v, want missing-path", r0["status"])
+	}
+	if r0["safe"] != true {
+		t.Fatalf("results[0].safe = %v, want true", r0["safe"])
+	}
+}
+
+func TestSealTestJSONInvalidPath(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "key1")
+
+	// An absolute path is an input contract violation: ok:false.
+	result := cli.gitKura(wt, "seal", "test", "--json", "../outside.txt")
+	requireNonZeroExitCode(t, result)
+	requireEmptyStderr(t, result)
+	requireErrorEnvelope(t, result.stdout, "seal.test")
+}
+
+func TestSealTestJSONCurrentKeyUnresolved(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	// The main checkout is not a managed worktree: current key unresolved.
+	result := cli.gitKura(repo, "seal", "test", "--json", "tracked.txt")
+	requireNonZeroExitCode(t, result)
+	requireEmptyStderr(t, result)
+
+	env := requireErrorEnvelope(t, result.stdout, "seal.test")
+	errObj := env["error"].(map[string]any)
+	if errObj["code"] != "current-key-unresolved" {
+		t.Fatalf("error.code = %v, want current-key-unresolved", errObj["code"])
+	}
+	details, ok := errObj["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("error.details is not an object: %v", errObj["details"])
+	}
+	reason, _ := details["reason"].(string)
+	if reason == "" {
+		t.Fatalf("error.details.reason is empty")
+	}
+}
+
+func TestSealTestJSONPreservesResultOrder(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	commitFile(t, repo, "second.txt", "content\n")
+	commitFile(t, repo, "third.txt", "content\n")
+	wt1 := cli.openWorktree(t, repo, "key1")
+	wt2 := cli.openWorktree(t, repo, "key2")
+
+	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "third.txt"), 0)
+
+	result := cli.gitKura(wt2, "seal", "test", "--json", "tracked.txt", "second.txt", "third.txt")
+	requireExitCode(t, result, exitSealConflict)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.test", sealTestDataSchema)
+	results, ok := data["results"].([]any)
+	if !ok || len(results) != 3 {
+		t.Fatalf("results = %v, want 3 entries", data["results"])
+	}
+	// Order must match input order.
+	paths := []string{
+		results[0].(map[string]any)["path"].(string),
+		results[1].(map[string]any)["path"].(string),
+		results[2].(map[string]any)["path"].(string),
+	}
+	if paths[0] != "tracked.txt" || paths[1] != "second.txt" || paths[2] != "third.txt" {
+		t.Fatalf("result order = %v, want [tracked.txt second.txt third.txt]", paths)
+	}
+}
+
+func TestSealTestJSONConformsToEnvelopeSchema(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "key1")
+
+	requireExitCode(t, cli.gitKura(wt, "seal", "claim", "tracked.txt"), 0)
+
+	result := cli.gitKura(wt, "seal", "test", "--json", "tracked.txt")
+	requireExitCode(t, result, 0)
+	requireConformsToEnvelopeSchema(t, result.stdout)
+}
+
+// --- seal doctor --json integration tests ---
+
+func TestSealDoctorJSONHealthy(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "key1")
+	requireExitCode(t, cli.gitKura(wt, "seal", "claim", "tracked.txt"), 0)
+
+	result := cli.gitKura(repo, "seal", "doctor", "--json")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.doctor", sealDoctorDataSchema)
+	if data["healthy"] != true {
+		t.Fatalf("healthy = %v, want true", data["healthy"])
+	}
+	findings, ok := data["findings"].([]any)
+	if !ok || len(findings) != 0 {
+		t.Fatalf("findings = %v, want empty", data["findings"])
+	}
+	summary, ok := data["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("summary is not an object: %v", data["summary"])
+	}
+	if summary["checkedClaims"] != float64(1) {
+		t.Fatalf("summary.checkedClaims = %v, want 1", summary["checkedClaims"])
+	}
+}
+
+func TestSealDoctorJSONIntegrityFinding(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	// A non-normalized path is an integrity violation in the store.
+	seedSealStore(t, repo, map[string]sealEntry{
+		"src/./a.go": {Key: "key1"},
+	})
+
+	result := cli.gitKura(repo, "seal", "doctor", "--json")
+	// Integrity finding: ok:true but exit 7 and data.healthy:false.
+	requireExitCode(t, result, exitSealDoctorError)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.doctor", sealDoctorDataSchema)
+	if data["healthy"] != false {
+		t.Fatalf("healthy = %v, want false", data["healthy"])
+	}
+	findings, ok := data["findings"].([]any)
+	if !ok || len(findings) == 0 {
+		t.Fatalf("findings = %v, want at least 1 entry", data["findings"])
+	}
+	f0 := findings[0].(map[string]any)
+	if f0["severity"] != "error" {
+		t.Fatalf("findings[0].severity = %v, want error", f0["severity"])
+	}
+	if f0["code"] == "" {
+		t.Fatalf("findings[0].code is empty")
+	}
+	if f0["message"] == "" {
+		t.Fatalf("findings[0].message is empty")
+	}
+}
+
+func TestSealDoctorJSONMalformedStore(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	storeFile, _, err := pathsSealStore(repo)
+	if err != nil {
+		t.Fatalf("pathsSealStore: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(storeFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(storeFile, []byte(`{invalid`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := cli.gitKura(repo, "seal", "doctor", "--json")
+	requireExitCode(t, result, exitSealDoctorError)
+	requireEmptyStderr(t, result)
+
+	env := requireErrorEnvelope(t, result.stdout, "seal.doctor")
+	errObj := env["error"].(map[string]any)
+	if errObj["code"] != "seal-doctor-error" {
+		t.Fatalf("error.code = %v, want seal-doctor-error", errObj["code"])
+	}
+}
+
+func TestSealDoctorJSONConformsToEnvelopeSchema(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "seal", "doctor", "--json")
+	requireExitCode(t, result, 0)
+	requireConformsToEnvelopeSchema(t, result.stdout)
+}
