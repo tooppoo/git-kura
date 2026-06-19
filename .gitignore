@@ -9,6 +9,7 @@
 # Go build output
 /bin/
 /dist/
+/.tools-dist/
 /build/
 *.out
 

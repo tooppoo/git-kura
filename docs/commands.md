@@ -232,7 +232,9 @@ If the store is malformed or inconsistent, `doctor` exits with `seal-doctor-erro
 
 `git kura tools` installs, removes, and inspects *tool components*: self-contained helpers — such as a pre-commit hook or an editor skill — that git-kura installs into the repository from a verified release asset and can later remove.
 
-The framework recognizes three component IDs: `pre-commit`, `claude-skill`, and `codex-skill`. `claude-skill` and `codex-skill` are not yet implemented: `install` reports that installation is not yet implemented and `status` / `uninstall` report `not-installed`. `pre-commit` is fully implemented.
+The framework recognizes three component IDs: `pre-commit`, `claude-skill`, and `codex-skill`. All three are fully implemented.
+
+`git kura tools install claude-skill` installs a SKILL.md file to `<repository-root>/.claude/skills/git-kura/SKILL.md`, teaching a Claude Code agent how to use git-kura safely. `git kura tools install codex-skill` installs the equivalent to `<repository-root>/.agents/skills/git-kura/SKILL.md` for Codex. Both components install files from the tools release archive into the representative root — the stable repository root derived from the git common dir — so the skill files remain in place even when the command is run from inside a managed worktree. Existing user-modified or unmanaged files at the destination are never overwritten; `install` fails instead.
 
 `git kura tools install pre-commit` installs a thin wrapper script and points `core.hooksPath` at the managed hooks directory using the repository-local config scope only. At commit time the hook runs the same path-level seal check as `git kura seal test` against the staged files, chains any previously configured pre-commit hook, and re-checks the staged files after the previous hook finishes. The commit is rejected when any check fails. This is a local safety guard only; `git commit --no-verify` bypasses it entirely. If a higher-precedence `core.hooksPath` (`worktree` or `command` scope) would shadow the local setting, `install` fails before changing anything. `git kura tools uninstall pre-commit` restores `core.hooksPath` to its prior state.
 
@@ -327,5 +329,6 @@ Kura uses stable exit codes so scripts and AI-agent workflows can react correctl
 | 5 | Seal lock timeout |
 | 6 | Seal conflict |
 | 7 | Seal doctor error |
+| 8 | Repository context error |
 
-Exit code 5 is signalled by `seal claim`, `seal unclaim`, `close`, `tools install`, and `tools uninstall`. Exit code 6 is signalled by `seal claim`, `seal unclaim`, and `seal test`. Exit code 7 is signalled by `seal doctor` when the seal store fails integrity validation. The stderr message always starts with a stable reason token (`seal-lock-timeout:` or `tools-metadata-lock-timeout:` for code 5, `seal-conflict:`, or `seal-doctor-error:`) that scripts can match without parsing arbitrary text.
+Exit code 5 is signalled by `seal claim`, `seal unclaim`, `close`, `tools install`, and `tools uninstall`. Exit code 6 is signalled by `seal claim`, `seal unclaim`, and `seal test`. Exit code 7 is signalled by `seal doctor` when the seal store fails integrity validation. Exit code 8 is signalled by `tools` subcommands when they require a git repository context but are run outside one. The stderr message always starts with a stable reason token (`seal-lock-timeout:` or `tools-metadata-lock-timeout:` for code 5, `seal-conflict:`, `seal-doctor-error:`, or `not-in-git-repository:` for code 8) that scripts can match without parsing arbitrary text.

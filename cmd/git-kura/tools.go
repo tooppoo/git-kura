@@ -389,7 +389,8 @@ func cmdToolsUninstall(deps toolsDeps, targets []toolsComponent) error {
 func toolsRepoDirs() (repoRoot, commonDir string, err error) {
 	repoRoot, err = gitutil.RepoRoot()
 	if err != nil {
-		return "", "", fmt.Errorf("not inside a git repository")
+		return "", "", exitCodeError(exitRepositoryContextError,
+			fmt.Errorf("not-in-git-repository: not inside a git repository"))
 	}
 	commonDir, err = gitutil.CommonDir(repoRoot)
 	if err != nil {

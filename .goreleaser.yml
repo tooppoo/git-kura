@@ -2,6 +2,10 @@ version: 2
 
 project_name: git-kura
 
+before:
+  hooks:
+    - sh scripts/build-tools-archive.sh {{ .Version }} .tools-dist
+
 builds:
   - id: git-kura
     main: ./cmd/git-kura
@@ -31,6 +35,11 @@ archives:
       - README.md
       - LICENSE
       - third_party_licenses/**/*
+
+release:
+  extra_files:
+    - glob: .tools-dist/git-kura-tools_*.tar.gz
+    - glob: .tools-dist/git-kura-tools_*.json
 
 checksum:
   name_template: checksums.txt
