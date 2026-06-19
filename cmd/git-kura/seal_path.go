@@ -546,7 +546,7 @@ func cmdSealUnclaim(rawPaths []string) error {
 func cmdSealTest(opts sealTestOptions, rawPaths []string) error {
 	repoTop, err := gitutil.RepoRoot()
 	if err != nil {
-		return sealTestFail(opts, fmt.Errorf("current-key-unresolved: not inside a git repository"))
+		return sealTestCurrentKeyFail(opts, fmt.Errorf("not inside a git repository"), "")
 	}
 
 	key, keyErr := worktree.CurrentKey(repoTop)
@@ -580,24 +580,25 @@ func cmdSealTest(opts sealTestOptions, rawPaths []string) error {
 		var item sealTestResultItem
 		item.Path = storeKey
 		switch {
-		case !fileExists:
-			item.Status = "missing-path"
-			item.Safe = true
-			item.ClaimedBy = nil
-		case !sealed:
-			item.Status = "unclaimed"
-			item.Safe = true
-			item.ClaimedBy = nil
-		case entry.Key == key:
-			k := key
-			item.Status = "claimed-by-current-key"
-			item.Safe = true
-			item.ClaimedBy = &k
-		default:
+		case sealed && entry.Key != key:
+			// Claimed by a different key: conflict regardless of filesystem existence.
 			k := entry.Key
 			item.Status = "claimed-by-other-key"
 			item.Safe = false
 			item.ClaimedBy = &k
+		case sealed && entry.Key == key:
+			k := key
+			item.Status = "claimed-by-current-key"
+			item.Safe = true
+			item.ClaimedBy = &k
+		case !fileExists:
+			item.Status = "missing-path"
+			item.Safe = true
+			item.ClaimedBy = nil
+		default:
+			item.Status = "unclaimed"
+			item.Safe = true
+			item.ClaimedBy = nil
 		}
 		results = append(results, item)
 	}
@@ -665,7 +666,11 @@ func sealTestCurrentKeyFail(opts sealTestOptions, keyErr error, repoTop string) 
 		return fmt.Errorf("%s", msg)
 	}
 
-	repoTopCopy := repoTop
+	var repoTopPtr *string
+	if repoTop != "" {
+		repoTopCopy := repoTop
+		repoTopPtr = &repoTopCopy
+	}
 	cerr := &CommandError{
 		Command:  commandSealTest,
 		Code:     "current-key-unresolved",
@@ -673,7 +678,7 @@ func sealTestCurrentKeyFail(opts sealTestOptions, keyErr error, repoTop string) 
 		ExitCode: exitGeneralError,
 		Details: currentKeyUnresolvedDetails{
 			Reason:         reason,
-			RepositoryRoot: &repoTopCopy,
+			RepositoryRoot: repoTopPtr,
 			MetadataPath:   metaPath,
 		},
 	}
@@ -684,6 +689,9 @@ func sealTestCurrentKeyFail(opts sealTestOptions, keyErr error, repoTop string) 
 // worktree.CurrentKey failure by pattern-matching the error message.
 func classifyCurrentKeyError(err error, repoTop string) (reason string, metaPath *string) {
 	msg := err.Error()
+	if strings.Contains(msg, "not inside a git repository") {
+		return "not-inside-git-repository", nil
+	}
 	if strings.Contains(msg, "not inside a git-kura managed worktree") {
 		return "not-in-managed-worktree", nil
 	}

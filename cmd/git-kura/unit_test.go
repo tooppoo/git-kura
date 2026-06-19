@@ -2093,6 +2093,17 @@ func TestSealDoctorFailJSONEmitsErrorEnvelope(t *testing.T) {
 
 // --- classifyCurrentKeyError branches ---
 
+func TestClassifyCurrentKeyErrorNotInsideGitRepository(t *testing.T) {
+	err := fmt.Errorf("not inside a git repository")
+	reason, meta := classifyCurrentKeyError(err, "")
+	if reason != "not-inside-git-repository" {
+		t.Fatalf("reason = %q, want not-inside-git-repository", reason)
+	}
+	if meta != nil {
+		t.Fatalf("meta = %v, want nil", meta)
+	}
+}
+
 func TestClassifyCurrentKeyErrorNotInManagedWorktree(t *testing.T) {
 	err := fmt.Errorf("current directory is not inside a git-kura managed worktree")
 	reason, meta := classifyCurrentKeyError(err, t.TempDir())
@@ -2293,5 +2304,65 @@ func TestCmdSealTestJSONCurrentKeyUnresolvedInProcess(t *testing.T) {
 	})
 	if !strings.Contains(out, `"current-key-unresolved"`) {
 		t.Fatalf("expected current-key-unresolved in output, got: %q", out)
+	}
+}
+
+func TestCmdSealTestJSONCurrentKeyUnresolvedOutsideGitInProcess(t *testing.T) {
+	outside := t.TempDir()
+
+	var out string
+	withWorkingDir(t, outside, func() {
+		var err error
+		out, err = captureStdout(t, func() error {
+			return cmdSealTest(sealTestOptions{JSON: true}, []string{"any.txt"})
+		})
+		if err == nil {
+			t.Fatal("expected error outside git repo, got nil")
+		}
+	})
+	if !strings.Contains(out, `"current-key-unresolved"`) {
+		t.Fatalf("expected current-key-unresolved in output, got: %q", out)
+	}
+	if !strings.Contains(out, `"not-inside-git-repository"`) {
+		t.Fatalf("expected not-inside-git-repository reason, got: %q", out)
+	}
+}
+
+func TestCmdSealTestJSONConflictForMissingFileInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt1 := openManagedWorktree(t, repo, "key1")
+	wt2 := openManagedWorktree(t, repo, "key2")
+
+	withWorkingDir(t, wt1, func() {
+		if err := cmdSealClaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim: %v", err)
+		}
+	})
+
+	// Delete the file — it is still claimed by key1 in the store.
+	if err := os.Remove(filepath.Join(repo, "tracked.txt")); err != nil {
+		t.Fatalf("remove tracked.txt: %v", err)
+	}
+
+	var out string
+	withWorkingDir(t, wt2, func() {
+		var err error
+		out, err = captureStdout(t, func() error {
+			return cmdSealTest(sealTestOptions{JSON: true}, []string{"tracked.txt"})
+		})
+		if err == nil {
+			t.Fatal("expected conflict error for missing-but-claimed file, got nil")
+		}
+		var re *renderedError
+		if !errors.As(err, &re) || re.code != exitSealConflict {
+			t.Fatalf("expected exitSealConflict, got: %v", err)
+		}
+	})
+	if !strings.Contains(out, `"passed":false`) {
+		t.Fatalf("expected passed:false for claimed-by-other-key even when file missing, got: %q", out)
+	}
+	if !strings.Contains(out, `"claimed-by-other-key"`) {
+		t.Fatalf("expected claimed-by-other-key status, got: %q", out)
 	}
 }
