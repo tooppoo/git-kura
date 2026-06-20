@@ -226,6 +226,22 @@ func TestPreCommitHookSkipsMissingPrevious(t *testing.T) {
 	}
 }
 
+func TestEvaluateSealedPaths(t *testing.T) {
+	store := sealPathStore{Paths: map[string]sealEntry{
+		"a.txt":     {Key: "k1"},
+		"dir/b.txt": {Key: "k2"},
+	}}
+	if c := evaluateSealedPaths(store, sealKeyNone, []string{"a.txt", "free.txt"}); len(c) != 1 {
+		t.Fatalf("key none: want 1 conflict, got %d", len(c))
+	}
+	if c := evaluateSealedPaths(store, "k1", []string{"a.txt", "dir/b.txt"}); len(c) != 1 || c[0].sealedBy != "k2" {
+		t.Fatalf("key k1: want 1 conflict by k2, got %v", c)
+	}
+	if c := evaluateSealedPaths(store, "k1", []string{"./dir/b.txt"}); len(c) != 1 {
+		t.Fatalf("want canonicalized match, got %d", len(c))
+	}
+}
+
 func TestPreCommitHookFailsClosedOutsideRepo(t *testing.T) {
 	dir := t.TempDir()
 	if code := exitCodeOf(runHook(t, dir)); code != exitGeneralError {
