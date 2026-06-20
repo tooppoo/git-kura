@@ -104,7 +104,7 @@ Every input path appears in `paths` with its preflight classification.
 Blocking statuses prevent the write; non-blocking statuses show what would
 have happened. `conflicts[]` lists ownership conflicts (one entry per
 `owned-by-other` path). `duplicates[]` lists duplicate normalized paths.
-See `docs/commands/seal-mutation-status.md` for the full status catalogue.
+See `docs/commands/seal-commands/mutation-status.md` for the full status catalogue.
 
 For store-level failures (`read-store`, `validate-store`, `write-store`),
 `phase` identifies the failed stage and `storeError` carries the store-wide
