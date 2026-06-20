@@ -21,9 +21,17 @@ var sealTestDataSchemaJSON []byte
 //go:embed schema/commands/seal_doctor.schema.json
 var sealDoctorDataSchemaJSON []byte
 
+//go:embed schema/commands/seal_claim.schema.json
+var sealClaimDataSchemaJSON []byte
+
+//go:embed schema/commands/seal_unclaim.schema.json
+var sealUnclaimDataSchemaJSON []byte
+
 var sealLsDataSchema = mustCompileSealLsDataSchema()
 var sealTestDataSchema = mustCompileSealTestDataSchema()
 var sealDoctorDataSchema = mustCompileSealDoctorDataSchema()
+var sealClaimDataSchema = mustCompileSchema("seal_claim.schema.json", sealClaimDataSchemaJSON)
+var sealUnclaimDataSchema = mustCompileSchema("seal_unclaim.schema.json", sealUnclaimDataSchemaJSON)
 
 func mustCompileSealLsDataSchema() *jsonschema.Schema {
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(sealLsDataSchemaJSON))
@@ -84,6 +92,87 @@ type sealTestOptions struct {
 
 type sealDoctorOptions struct {
 	JSON bool
+}
+
+type sealClaimOptions struct {
+	JSON bool
+}
+
+type sealUnclaimOptions struct {
+	JSON bool
+}
+
+// sealClaimPathItem is one path's result in the seal claim success data.
+type sealClaimPathItem struct {
+	Path   string `json:"path"`
+	Status string `json:"status"` // "claimed" or "already-owned"
+}
+
+// sealClaimData is the structured success payload for seal claim --json.
+type sealClaimData struct {
+	CurrentKey string              `json:"currentKey"`
+	Paths      []sealClaimPathItem `json:"paths"`
+}
+
+func (d sealClaimData) RenderHuman(_ io.Writer) error { return nil }
+
+// sealUnclaimPathItem is one path's result in the seal unclaim success data.
+type sealUnclaimPathItem struct {
+	Path   string `json:"path"`
+	Status string `json:"status"` // "released" or "not-claimed"
+}
+
+// sealUnclaimData is the structured success payload for seal unclaim --json.
+type sealUnclaimData struct {
+	CurrentKey string                `json:"currentKey"`
+	Paths      []sealUnclaimPathItem `json:"paths"`
+}
+
+func (d sealUnclaimData) RenderHuman(_ io.Writer) error { return nil }
+
+// sealMutationPathItem is one path item in seal mutation error details.
+// Status values for claim errors: "would-claim", "already-owned", "owned-by-other",
+// "duplicate", "invalid-path", "outside-repository".
+// Status values for unclaim errors: "would-release", "not-claimed", "owned-by-other",
+// "duplicate", "invalid-path", "outside-repository".
+type sealMutationPathItem struct {
+	Path        string `json:"path"`
+	Status      string `json:"status"`
+	OwnerKey    string `json:"ownerKey,omitempty"`
+	DuplicateOf *int   `json:"duplicateOf,omitempty"`
+}
+
+// sealMutationErrorDetails is the error.details payload for seal claim/unclaim
+// failures. Preflight failures populate Phase, CurrentKey, Paths, Conflicts,
+// and Duplicates. Store-level failures populate Phase and StoreError only.
+type sealMutationErrorDetails struct {
+	Phase      string                 `json:"phase,omitempty"`
+	CurrentKey string                 `json:"currentKey,omitempty"`
+	Paths      []sealMutationPathItem `json:"paths,omitempty"`
+	Conflicts  []sealConflictItem     `json:"conflicts,omitempty"`
+	Duplicates []sealDuplicateItem    `json:"duplicates,omitempty"`
+	StoreError *sealStoreError        `json:"storeError,omitempty"`
+}
+
+// sealConflictItem describes a single ownership conflict in error.details.conflicts[].
+type sealConflictItem struct {
+	Path         string `json:"path"`
+	OwnerKey     string `json:"ownerKey"`
+	RequestedKey string `json:"requestedKey"`
+}
+
+// sealDuplicateItem describes a duplicate normalized path in error.details.duplicates[].
+type sealDuplicateItem struct {
+	Path           string `json:"path"`
+	FirstIndex     int    `json:"firstIndex"`
+	DuplicateIndex int    `json:"duplicateIndex"`
+}
+
+// sealStoreError describes a store-wide failure in error.details.storeError.
+// It is required when phase is read-store, validate-store, or write-store.
+type sealStoreError struct {
+	Status string `json:"status"`
+	Path   string `json:"path,omitempty"`
 }
 
 // sealLsClaim is one entry in the seal ls JSON output.
@@ -210,7 +299,7 @@ Flags:
   --json   Print structured output as a JSON envelope. --json must appear
            before the optional key argument.`
 
-const sealClaimHelp = `Usage: git kura seal claim <path> [path...]
+const sealClaimHelp = `Usage: git kura seal claim [--json] <path> [path...]
 
 Claim one or more file paths for the current key in the seal store.
 
@@ -224,6 +313,11 @@ Exits with error if:
 
 If a path is already claimed by the current key, it is skipped (idempotent).
 
+Flags:
+  --json   Print structured output as a JSON envelope. On error, exits non-zero
+           with an ok:false envelope on stdout. --json must appear before the
+           path arguments.
+
 Current key:
   The current key is derived from the git-kura managed worktree you are in:
   run this command from inside the worktree created by "git kura open <key>"
@@ -231,7 +325,7 @@ Current key:
   directory is not inside a managed worktree, or when that worktree's
   metadata is missing or inconsistent.`
 
-const sealUnclaimHelp = `Usage: git kura seal unclaim <path> [path...]
+const sealUnclaimHelp = `Usage: git kura seal unclaim [--json] <path> [path...]
 
 Release the current key's claim on one or more file paths in the seal store.
 
@@ -243,6 +337,11 @@ Exits with error if:
   - any path is claimed by a different key
 
 Paths not currently claimed are skipped (idempotent).
+
+Flags:
+  --json   Print structured output as a JSON envelope. On error, exits non-zero
+           with an ok:false envelope on stdout. --json must appear before the
+           path arguments.
 
 Current key:
   The current key is derived from the git-kura managed worktree you are in:
@@ -338,10 +437,11 @@ func runSealClaim(args []string) error {
 		fmt.Println(sealClaimHelp)
 		return nil
 	}
-	if len(args) == 0 {
-		return fmt.Errorf("usage: git kura seal claim <path> [path...]")
+	opts, paths, err := parseSealClaimArgs(args)
+	if err != nil {
+		return err
 	}
-	return cmdSealClaim(args)
+	return cmdSealClaim(opts, paths)
 }
 
 func runSealUnclaim(args []string) error {
@@ -349,10 +449,53 @@ func runSealUnclaim(args []string) error {
 		fmt.Println(sealUnclaimHelp)
 		return nil
 	}
-	if len(args) == 0 {
-		return fmt.Errorf("usage: git kura seal unclaim <path> [path...]")
+	opts, paths, err := parseSealUnclaimArgs(args)
+	if err != nil {
+		return err
 	}
-	return cmdSealUnclaim(args)
+	return cmdSealUnclaim(opts, paths)
+}
+
+// parseSealClaimArgs parses seal claim arguments. --json must appear before
+// the path arguments. At least one path is required.
+func parseSealClaimArgs(args []string) (sealClaimOptions, []string, error) {
+	var opts sealClaimOptions
+	if len(args) > 0 && args[0] == "--json" {
+		opts.JSON = true
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		return sealClaimOptions{}, nil, exitCodeError(exitUsageError,
+			fmt.Errorf("usage: git kura seal claim [--json] <path> [path...]"))
+	}
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			return sealClaimOptions{}, nil, exitCodeError(exitUsageError,
+				fmt.Errorf("usage: git kura seal claim [--json] <path> [path...]: unknown option %q", a))
+		}
+	}
+	return opts, args, nil
+}
+
+// parseSealUnclaimArgs parses seal unclaim arguments. --json must appear
+// before the path arguments. At least one path is required.
+func parseSealUnclaimArgs(args []string) (sealUnclaimOptions, []string, error) {
+	var opts sealUnclaimOptions
+	if len(args) > 0 && args[0] == "--json" {
+		opts.JSON = true
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		return sealUnclaimOptions{}, nil, exitCodeError(exitUsageError,
+			fmt.Errorf("usage: git kura seal unclaim [--json] <path> [path...]"))
+	}
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			return sealUnclaimOptions{}, nil, exitCodeError(exitUsageError,
+				fmt.Errorf("usage: git kura seal unclaim [--json] <path> [path...]: unknown option %q", a))
+		}
+	}
+	return opts, args, nil
 }
 
 func runSealTest(args []string) error {

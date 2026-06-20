@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/cmd/git-kura/schema/commands/open.schema.json",
+  "title": "git kura open — envelope data",
+  "description": "Command-specific schema for the data payload of `git kura open --json` (both dry-run and actual open), nested under the common envelope's data field.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "key",
+    "kind",
+    "branch",
+    "worktreePath",
+    "repositoryRoot",
+    "baseBranch",
+    "exists",
+    "dirty"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version of this data payload."
+    },
+    "key": {
+      "type": "string",
+      "description": "The key passed to the command.",
+      "allOf": [
+        { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+        { "not": { "pattern": "\\.\\." } },
+        { "not": { "pattern": "\\.$" } },
+        { "not": { "pattern": "\\.lock$" } }
+      ]
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["worktree"],
+      "description": "Workspace kind."
+    },
+    "branch": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Git branch for the key."
+    },
+    "worktreePath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute path of the worktree."
+    },
+    "repositoryRoot": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute path to the repository root."
+    },
+    "baseBranch": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Branch the worktree was (or would be) created from."
+    },
+    "exists": {
+      "type": "boolean",
+      "description": "Whether the worktree directory exists. Always false for dry-run."
+    },
+    "dirty": {
+      "type": "boolean",
+      "description": "Whether the worktree has uncommitted changes. Always false for dry-run."
+    },
+    "createdWorktree": {
+      "type": "boolean",
+      "description": "Whether this invocation created the git worktree. Present only for actual open (not dry-run)."
+    },
+    "createdBranch": {
+      "type": "boolean",
+      "description": "Whether this invocation created the branch. Present only for actual open (not dry-run)."
+    },
+    "createdMetadata": {
+      "type": "boolean",
+      "description": "Whether this invocation created the kura metadata file. Present only for actual open (not dry-run)."
+    }
+  }
+}

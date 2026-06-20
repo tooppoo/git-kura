@@ -55,6 +55,13 @@ func validateSealStoreJSON(data []byte) error {
 	return nil
 }
 
+// sealStoreValidationErr wraps a schema-validation failure from readSealStore.
+// Callers use errors.As to distinguish validate-store failures from file-read failures.
+type sealStoreValidationErr struct{ cause error }
+
+func (e sealStoreValidationErr) Error() string { return e.cause.Error() }
+func (e sealStoreValidationErr) Unwrap() error { return e.cause }
+
 // defaultSealLockTimeout is the seal store lock timeout used when
 // kura.sealLockTimeoutMs is unset. See resolveSealLockTimeout.
 const defaultSealLockTimeout = 5 * time.Second
@@ -162,7 +169,7 @@ func readSealStore(path string) (sealPathStore, error) {
 	// Validate before unmarshalling so a hand-edited or corrupted store is
 	// rejected instead of being silently coerced into the Go struct.
 	if err := validateSealStoreJSON(data); err != nil {
-		return sealPathStore{}, fmt.Errorf("read seal store %s: %w", path, err)
+		return sealPathStore{}, sealStoreValidationErr{cause: fmt.Errorf("validate seal store %s: %w", path, err)}
 	}
 	var store sealPathStore
 	if err := json.Unmarshal(data, &store); err != nil {
@@ -391,149 +398,477 @@ func sealConflictError(conflicts []sealConflict) error {
 		fmt.Errorf("seal-conflict: %s", strings.Join(parts, "; ")))
 }
 
-func cmdSealClaim(rawPaths []string) error {
+func cmdSealClaim(opts sealClaimOptions, rawPaths []string) error {
 	key, err := readSealContext()
 	if err != nil {
-		return err
+		return sealClaimFail(opts, "preflight", err)
 	}
 
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
-		return fmt.Errorf("not inside a git repository")
+		return sealClaimFail(opts, "preflight", fmt.Errorf("not inside a git repository"))
 	}
 
 	storeFile, lockFile, err := pathsSealStore(repoRoot)
 	if err != nil {
-		return err
+		return sealClaimFail(opts, "preflight", err)
 	}
 
 	timeout, err := resolveSealLockTimeout(repoRoot)
 	if err != nil {
-		return err
+		return sealClaimFail(opts, "preflight", err)
 	}
 	release, err := acquireSealLock(lockFile, timeout)
 	if err != nil {
-		return err
+		return sealClaimFail(opts, "preflight", err)
 	}
 	defer release()
 
 	store, err := readSealStore(storeFile)
 	if err != nil {
-		return err
+		phase := "read-store"
+		if errors.As(err, new(sealStoreValidationErr)) {
+			phase = "validate-store"
+		}
+		return sealClaimStoreFail(opts, phase, storeFile, err)
 	}
 
-	// Validate all paths before modifying the store; partial success is not
-	// allowed. Cross-key conflicts are collected so the error reports every
-	// conflicting path with the key that seals it.
-	var conflicts []sealConflict
-	toAdd := make([]string, 0, len(rawPaths))
-	for _, rawPath := range rawPaths {
-		relPath, err := normalizeSealPath(repoRoot, rawPath)
-		if err != nil {
-			return err
+	// Preflight: classify all paths before mutating the store. Blocking statuses
+	// prevent the write; non-blocking statuses are carried through to success output.
+	// humanErr carries the descriptive error message used in non-JSON mode.
+	type pathResult struct {
+		storeKey      string
+		claimStatus   string // success status: "claimed" or "already-owned"
+		preflightItem sealMutationPathItem
+		blocking      bool
+		humanErr      error // descriptive message for non-JSON mode
+	}
+	results := make([]pathResult, 0, len(rawPaths))
+	seen := make(map[string]int, len(rawPaths)) // normalized store key → first index
+	hasBlocking := false
+
+	for i, rawPath := range rawPaths {
+		relPath, normErr := normalizeSealPath(repoRoot, rawPath)
+		if normErr != nil {
+			status := "invalid-path"
+			if strings.Contains(normErr.Error(), "outside the repository root") {
+				status = "outside-repository"
+			}
+			results = append(results, pathResult{
+				preflightItem: sealMutationPathItem{Path: rawPath, Status: status},
+				blocking:      true,
+				humanErr:      normErr,
+			})
+			hasBlocking = true
+			continue
 		}
 		storeKey := filepath.ToSlash(relPath)
 
-		info, err := os.Stat(filepath.Join(repoRoot, relPath))
-		if err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("path %q does not exist", rawPath)
-			}
-			return fmt.Errorf("check path: %w", err)
+		if firstIdx, dup := seen[storeKey]; dup {
+			results = append(results, pathResult{
+				storeKey: storeKey,
+				preflightItem: sealMutationPathItem{
+					Path:        rawPath,
+					Status:      "duplicate",
+					DuplicateOf: &firstIdx,
+				},
+				blocking: true,
+				humanErr: fmt.Errorf("path %q is a duplicate of argument at index %d", rawPath, firstIdx),
+			})
+			hasBlocking = true
+			continue
 		}
-		// Only files can be sealed; directory seals are out of scope (see
-		// docs/adr/20260611T114624Z_limit-seal-targets-to-repository-relative-files.md).
+		seen[storeKey] = i
+
+		info, statErr := os.Stat(filepath.Join(repoRoot, relPath))
+		if statErr != nil {
+			var humanErr error
+			if os.IsNotExist(statErr) {
+				humanErr = fmt.Errorf("path %q does not exist", rawPath)
+			} else {
+				humanErr = fmt.Errorf("check path: %w", statErr)
+			}
+			results = append(results, pathResult{
+				storeKey:      storeKey,
+				preflightItem: sealMutationPathItem{Path: storeKey, Status: "invalid-path"},
+				blocking:      true,
+				humanErr:      humanErr,
+			})
+			hasBlocking = true
+			continue
+		}
 		if info.IsDir() {
-			return fmt.Errorf("path %q is a directory; only files can be claimed", rawPath)
+			results = append(results, pathResult{
+				storeKey:      storeKey,
+				preflightItem: sealMutationPathItem{Path: storeKey, Status: "invalid-path"},
+				blocking:      true,
+				humanErr:      fmt.Errorf("path %q is a directory; only files can be claimed", rawPath),
+			})
+			hasBlocking = true
+			continue
 		}
 
 		if entry, sealed := store.Paths[storeKey]; sealed {
 			if entry.Key != key {
-				conflicts = append(conflicts, sealConflict{path: rawPath, sealedBy: entry.Key})
+				results = append(results, pathResult{
+					storeKey: storeKey,
+					preflightItem: sealMutationPathItem{
+						Path:     storeKey,
+						Status:   "owned-by-other",
+						OwnerKey: entry.Key,
+					},
+					blocking: true,
+				})
+				hasBlocking = true
+			} else {
+				results = append(results, pathResult{
+					storeKey:      storeKey,
+					claimStatus:   "already-owned",
+					preflightItem: sealMutationPathItem{Path: storeKey, Status: "already-owned"},
+				})
 			}
-			// Already claimed under the current key: idempotent, nothing to write.
 			continue
 		}
-		toAdd = append(toAdd, storeKey)
+		results = append(results, pathResult{
+			storeKey:      storeKey,
+			claimStatus:   "claimed",
+			preflightItem: sealMutationPathItem{Path: storeKey, Status: "would-claim"},
+		})
 	}
 
-	if len(conflicts) > 0 {
-		return sealConflictError(conflicts)
+	if hasBlocking {
+		items := make([]sealMutationPathItem, len(results))
+		var conflictItems []sealConflictItem
+		var duplicateItems []sealDuplicateItem
+		for i, r := range results {
+			items[i] = r.preflightItem
+			if r.preflightItem.Status == "owned-by-other" {
+				conflictItems = append(conflictItems, sealConflictItem{
+					Path:         r.preflightItem.Path,
+					OwnerKey:     r.preflightItem.OwnerKey,
+					RequestedKey: key,
+				})
+			}
+			if r.preflightItem.Status == "duplicate" && r.preflightItem.DuplicateOf != nil {
+				duplicateItems = append(duplicateItems, sealDuplicateItem{
+					Path:           r.preflightItem.Path,
+					FirstIndex:     *r.preflightItem.DuplicateOf,
+					DuplicateIndex: i,
+				})
+			}
+		}
+		details := sealMutationErrorDetails{
+			Phase:      "preflight",
+			CurrentKey: key,
+			Paths:      items,
+			Conflicts:  conflictItems,
+			Duplicates: duplicateItems,
+		}
+		cerr := &CommandError{
+			Command:  commandSealClaim,
+			Code:     "seal-conflict",
+			Message:  "seal-conflict: one or more paths could not be claimed",
+			ExitCode: exitSealConflict,
+			Details:  details,
+		}
+		if !opts.JSON {
+			// Return the first non-conflict blocking error with a descriptive message;
+			// collect owned-by-other conflicts for the aggregated conflict error.
+			var conflicts []sealConflict
+			for _, r := range results {
+				if !r.blocking {
+					continue
+				}
+				if r.preflightItem.Status == "owned-by-other" {
+					conflicts = append(conflicts, sealConflict{path: r.preflightItem.Path, sealedBy: r.preflightItem.OwnerKey})
+				} else {
+					return r.humanErr
+				}
+			}
+			if len(conflicts) > 0 {
+				return sealConflictError(conflicts)
+			}
+		}
+		return emitError(renderJSON, cerr)
 	}
-	if len(toAdd) == 0 {
+
+	for _, r := range results {
+		if r.claimStatus == "claimed" {
+			store.Paths[r.storeKey] = sealEntry{Key: key}
+		}
+	}
+	if err := writeSealStore(storeFile, store); err != nil {
+		return sealClaimStoreFail(opts, "write-store", storeFile, err)
+	}
+
+	if !opts.JSON {
 		return nil
 	}
-	for _, storeKey := range toAdd {
-		store.Paths[storeKey] = sealEntry{Key: key}
+
+	pathItems := make([]sealClaimPathItem, len(results))
+	for i, r := range results {
+		pathItems[i] = sealClaimPathItem{Path: r.storeKey, Status: r.claimStatus}
 	}
-	return writeSealStore(storeFile, store)
+	data := sealClaimData{CurrentKey: key, Paths: pathItems}
+	if err := validateData(sealClaimDataSchema, data); err != nil {
+		return err
+	}
+	return emitResult(renderJSON, Result{Command: commandSealClaim, Data: data})
 }
 
-func cmdSealUnclaim(rawPaths []string) error {
+// sealClaimFail routes a seal claim preflight failure to the right output.
+// For store-level failures (read-store, write-store), use sealClaimStoreFail
+// so that the required storeError field is included.
+func sealClaimFail(opts sealClaimOptions, phase string, err error) error {
+	if !opts.JSON {
+		return err
+	}
+	details := sealMutationErrorDetails{Phase: phase}
+	cerr := toCommandError(commandSealClaim, err)
+	cerr.Details = details
+	return emitError(renderJSON, cerr)
+}
+
+// sealClaimStoreFail routes a seal claim store-level failure (read-store,
+// validate-store, or write-store) to the right output. It populates
+// error.details.storeError with the failed phase status and the store file path
+// as required by Issue #63.
+func sealClaimStoreFail(opts sealClaimOptions, phase string, storeFile string, err error) error {
+	if !opts.JSON {
+		return err
+	}
+	statusMap := map[string]string{
+		"read-store":     "store-read-error",
+		"validate-store": "store-validation-error",
+		"write-store":    "store-write-error",
+	}
+	details := sealMutationErrorDetails{
+		Phase:      phase,
+		StoreError: &sealStoreError{Status: statusMap[phase], Path: storeFile},
+	}
+	cerr := toCommandError(commandSealClaim, err)
+	cerr.Details = details
+	return emitError(renderJSON, cerr)
+}
+
+func cmdSealUnclaim(opts sealUnclaimOptions, rawPaths []string) error {
 	key, err := readSealContext()
 	if err != nil {
-		return err
+		return sealUnclaimFail(opts, "preflight", err)
 	}
 
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
-		return fmt.Errorf("not inside a git repository")
+		return sealUnclaimFail(opts, "preflight", fmt.Errorf("not inside a git repository"))
 	}
 
 	storeFile, lockFile, err := pathsSealStore(repoRoot)
 	if err != nil {
-		return err
+		return sealUnclaimFail(opts, "preflight", err)
 	}
 
 	timeout, err := resolveSealLockTimeout(repoRoot)
 	if err != nil {
-		return err
+		return sealUnclaimFail(opts, "preflight", err)
 	}
 	release, err := acquireSealLock(lockFile, timeout)
 	if err != nil {
-		return err
+		return sealUnclaimFail(opts, "preflight", err)
 	}
 	defer release()
 
 	store, err := readSealStore(storeFile)
 	if err != nil {
-		return err
+		phase := "read-store"
+		if errors.As(err, new(sealStoreValidationErr)) {
+			phase = "validate-store"
+		}
+		return sealUnclaimStoreFail(opts, phase, storeFile, err)
 	}
 
-	// Validate all paths before modifying the store; partial success is not
-	// allowed. Cross-key conflicts are collected so the error reports every
-	// conflicting path with the key that seals it.
-	var conflicts []sealConflict
-	toRemove := make([]string, 0, len(rawPaths))
-	for _, rawPath := range rawPaths {
-		relPath, err := normalizeSealPath(repoRoot, rawPath)
-		if err != nil {
-			return err
+	// Preflight: classify all paths before mutating the store.
+	// humanErr carries the descriptive error message used in non-JSON mode.
+	type pathResult struct {
+		storeKey      string
+		unclaimStatus string // success status: "released" or "not-claimed"
+		preflightItem sealMutationPathItem
+		blocking      bool
+		humanErr      error
+	}
+	results := make([]pathResult, 0, len(rawPaths))
+	seen := make(map[string]int, len(rawPaths))
+	hasBlocking := false
+
+	for i, rawPath := range rawPaths {
+		relPath, normErr := normalizeSealPath(repoRoot, rawPath)
+		if normErr != nil {
+			status := "invalid-path"
+			if strings.Contains(normErr.Error(), "outside the repository root") {
+				status = "outside-repository"
+			}
+			results = append(results, pathResult{
+				preflightItem: sealMutationPathItem{Path: rawPath, Status: status},
+				blocking:      true,
+				humanErr:      normErr,
+			})
+			hasBlocking = true
+			continue
 		}
 		storeKey := filepath.ToSlash(relPath)
 
+		if firstIdx, dup := seen[storeKey]; dup {
+			results = append(results, pathResult{
+				storeKey: storeKey,
+				preflightItem: sealMutationPathItem{
+					Path:        rawPath,
+					Status:      "duplicate",
+					DuplicateOf: &firstIdx,
+				},
+				blocking: true,
+				humanErr: fmt.Errorf("path %q is a duplicate of argument at index %d", rawPath, firstIdx),
+			})
+			hasBlocking = true
+			continue
+		}
+		seen[storeKey] = i
+
 		entry, sealed := store.Paths[storeKey]
 		if !sealed {
-			// Unclaiming a path that was never claimed: idempotent no-op.
+			results = append(results, pathResult{
+				storeKey:      storeKey,
+				unclaimStatus: "not-claimed",
+				preflightItem: sealMutationPathItem{Path: storeKey, Status: "not-claimed"},
+			})
 			continue
 		}
 		if entry.Key != key {
-			conflicts = append(conflicts, sealConflict{path: rawPath, sealedBy: entry.Key})
+			results = append(results, pathResult{
+				storeKey: storeKey,
+				preflightItem: sealMutationPathItem{
+					Path:     storeKey,
+					Status:   "owned-by-other",
+					OwnerKey: entry.Key,
+				},
+				blocking: true,
+			})
+			hasBlocking = true
 			continue
 		}
-		toRemove = append(toRemove, storeKey)
+		results = append(results, pathResult{
+			storeKey:      storeKey,
+			unclaimStatus: "released",
+			preflightItem: sealMutationPathItem{Path: storeKey, Status: "would-release"},
+		})
 	}
 
-	if len(conflicts) > 0 {
-		return sealConflictError(conflicts)
+	if hasBlocking {
+		items := make([]sealMutationPathItem, len(results))
+		var conflictItems []sealConflictItem
+		var duplicateItems []sealDuplicateItem
+		for i, r := range results {
+			items[i] = r.preflightItem
+			if r.preflightItem.Status == "owned-by-other" {
+				conflictItems = append(conflictItems, sealConflictItem{
+					Path:         r.preflightItem.Path,
+					OwnerKey:     r.preflightItem.OwnerKey,
+					RequestedKey: key,
+				})
+			}
+			if r.preflightItem.Status == "duplicate" && r.preflightItem.DuplicateOf != nil {
+				duplicateItems = append(duplicateItems, sealDuplicateItem{
+					Path:           r.preflightItem.Path,
+					FirstIndex:     *r.preflightItem.DuplicateOf,
+					DuplicateIndex: i,
+				})
+			}
+		}
+		details := sealMutationErrorDetails{
+			Phase:      "preflight",
+			CurrentKey: key,
+			Paths:      items,
+			Conflicts:  conflictItems,
+			Duplicates: duplicateItems,
+		}
+		cerr := &CommandError{
+			Command:  commandSealUnclaim,
+			Code:     "seal-conflict",
+			Message:  "seal-conflict: one or more paths could not be released",
+			ExitCode: exitSealConflict,
+			Details:  details,
+		}
+		if !opts.JSON {
+			var conflicts []sealConflict
+			for _, r := range results {
+				if !r.blocking {
+					continue
+				}
+				if r.preflightItem.Status == "owned-by-other" {
+					conflicts = append(conflicts, sealConflict{path: r.preflightItem.Path, sealedBy: r.preflightItem.OwnerKey})
+				} else {
+					return r.humanErr
+				}
+			}
+			if len(conflicts) > 0 {
+				return sealConflictError(conflicts)
+			}
+		}
+		return emitError(renderJSON, cerr)
 	}
-	if len(toRemove) == 0 {
+
+	for _, r := range results {
+		if r.unclaimStatus == "released" {
+			delete(store.Paths, r.storeKey)
+		}
+	}
+	if err := writeSealStore(storeFile, store); err != nil {
+		return sealUnclaimStoreFail(opts, "write-store", storeFile, err)
+	}
+
+	if !opts.JSON {
 		return nil
 	}
-	for _, storeKey := range toRemove {
-		delete(store.Paths, storeKey)
+
+	pathItems := make([]sealUnclaimPathItem, len(results))
+	for i, r := range results {
+		pathItems[i] = sealUnclaimPathItem{Path: r.storeKey, Status: r.unclaimStatus}
 	}
-	return writeSealStore(storeFile, store)
+	data := sealUnclaimData{CurrentKey: key, Paths: pathItems}
+	if err := validateData(sealUnclaimDataSchema, data); err != nil {
+		return err
+	}
+	return emitResult(renderJSON, Result{Command: commandSealUnclaim, Data: data})
+}
+
+// sealUnclaimFail routes a seal unclaim preflight failure to the right output.
+// For store-level failures (read-store, write-store), use sealUnclaimStoreFail.
+func sealUnclaimFail(opts sealUnclaimOptions, phase string, err error) error {
+	if !opts.JSON {
+		return err
+	}
+	details := sealMutationErrorDetails{Phase: phase}
+	cerr := toCommandError(commandSealUnclaim, err)
+	cerr.Details = details
+	return emitError(renderJSON, cerr)
+}
+
+// sealUnclaimStoreFail routes a seal unclaim store-level failure to the right
+// output, including the required error.details.storeError field.
+func sealUnclaimStoreFail(opts sealUnclaimOptions, phase string, storeFile string, err error) error {
+	if !opts.JSON {
+		return err
+	}
+	statusMap := map[string]string{
+		"read-store":     "store-read-error",
+		"validate-store": "store-validation-error",
+		"write-store":    "store-write-error",
+	}
+	details := sealMutationErrorDetails{
+		Phase:      phase,
+		StoreError: &sealStoreError{Status: statusMap[phase], Path: storeFile},
+	}
+	cerr := toCommandError(commandSealUnclaim, err)
+	cerr.Details = details
+	return emitError(renderJSON, cerr)
 }
 
 // cmdSealTest checks whether every path in rawPaths may be handled in the
