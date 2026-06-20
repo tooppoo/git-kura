@@ -562,7 +562,7 @@ func TestPreCommitHookRejectsClaimedWhenKeyNone(t *testing.T) {
 	wt := openManagedWorktree(t, repo, "owner")
 	stage(t, wt, "shared.txt", "x\n")
 	withWorkingDir(t, wt, func() {
-		if err := cmdSealClaim([]string{"shared.txt"}); err != nil {
+		if err := cmdSealClaim(sealClaimOptions{}, []string{"shared.txt"}); err != nil {
 			t.Fatalf("claim: %v", err)
 		}
 	})
@@ -583,7 +583,7 @@ func TestPreCommitHookRejectsForeignKeyClaim(t *testing.T) {
 
 	stage(t, wtB, "shared.txt", "b\n")
 	withWorkingDir(t, wtB, func() {
-		if err := cmdSealClaim([]string{"shared.txt"}); err != nil {
+		if err := cmdSealClaim(sealClaimOptions{}, []string{"shared.txt"}); err != nil {
 			t.Fatalf("claim: %v", err)
 		}
 	})
@@ -595,7 +595,7 @@ func TestPreCommitHookRejectsForeignKeyClaim(t *testing.T) {
 
 	stage(t, wtA, "ownfile.txt", "a\n")
 	withWorkingDir(t, wtA, func() {
-		if err := cmdSealClaim([]string{"ownfile.txt"}); err != nil {
+		if err := cmdSealClaim(sealClaimOptions{}, []string{"ownfile.txt"}); err != nil {
 			t.Fatalf("claim own: %v", err)
 		}
 	})
@@ -614,7 +614,7 @@ func TestPreCommitHookHandlesSpecialCharPaths(t *testing.T) {
 	weird := "a dir/with space.txt"
 	stage(t, wt, weird, "x\n")
 	withWorkingDir(t, wt, func() {
-		if err := cmdSealClaim([]string{weird}); err != nil {
+		if err := cmdSealClaim(sealClaimOptions{}, []string{weird}); err != nil {
 			t.Fatalf("claim: %v", err)
 		}
 	})

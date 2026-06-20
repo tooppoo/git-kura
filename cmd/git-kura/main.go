@@ -27,19 +27,27 @@ var version string = "0.1.0"
 //go:embed schema/get_data.schema.json
 var getDataSchemaJSON []byte
 
-//go:embed schema/open_dry_run_data.schema.json
-var openDryRunDataSchemaJSON []byte
+//go:embed schema/commands/open.schema.json
+var openDataSchemaJSON []byte
+
+//go:embed schema/commands/close.schema.json
+var closeDataSchemaJSON []byte
 
 //go:embed schema/commands/ls.schema.json
 var lsDataSchemaJSON []byte
 
-// getDataSchema, openDryRunDataSchema, and lsDataSchema are the command-specific
-// schemas for the data payload nested under the common envelope's data field.
-// They version independently of the envelope schema.
+// getDataSchema, openDataSchema, closeDataSchema, and lsDataSchema are the
+// command-specific schemas for the data payload nested under the common
+// envelope's data field. They version independently of the envelope schema.
 var (
-	getDataSchema        = mustCompileSchema("get_data.schema.json", getDataSchemaJSON)
-	openDryRunDataSchema = mustCompileSchema("open_dry_run_data.schema.json", openDryRunDataSchemaJSON)
-	lsDataSchema         = mustCompileSchema("ls.schema.json", lsDataSchemaJSON)
+	getDataSchema   = mustCompileSchema("get_data.schema.json", getDataSchemaJSON)
+	openDataSchema  = mustCompileSchema("open.schema.json", openDataSchemaJSON)
+	closeDataSchema = mustCompileSchema("close.schema.json", closeDataSchemaJSON)
+	lsDataSchema    = mustCompileSchema("ls.schema.json", lsDataSchemaJSON)
+
+	// openDryRunDataSchema is an alias for openDataSchema. The schema is shared
+	// by dry-run and actual open; this alias keeps existing references compiling.
+	openDryRunDataSchema = openDataSchema
 )
 
 func mustCompileSchema(name string, data []byte) *jsonschema.Schema {
@@ -91,16 +99,19 @@ Create a git worktree for <key> on a new branch <key>.
 
 Flags:
   --dry-run       Show the worktree that would be created, without creating it
-  --json          With --dry-run, print the result as a JSON envelope
+  --json          Print the result as a JSON envelope
 
-Without --json, --dry-run prints human-readable output. A dry run never creates
-the worktree, branch, or metadata; pre-creation conflicts are reported as
-warnings while the command still succeeds.`
+Without --json, open prints the worktree path on success. A dry run never
+creates the worktree, branch, or metadata; pre-creation conflicts are reported
+as warnings while the command still succeeds.`
 
-const closeHelp = `Usage: git kura close <key>
+const closeHelp = `Usage: git kura close <key> [flags]
 
 Remove the worktree and Kura-managed branch for <key>, and release the path
 seals that <key> holds in the repository-wide seal store.
+
+Flags:
+  --json   Print structured output as a JSON envelope
 
 close takes the seal store lock before any cleanup, so it can fail with
 seal-lock-timeout (exit code 5) when the lock is held, leaving everything
@@ -214,11 +225,11 @@ func run(args []string) error {
 			fmt.Println(closeHelp)
 			return nil
 		}
-		key, err := parseKeyOnlyArgs("close", args[1:])
+		key, opts, err := parseCloseArgs(args[1:])
 		if err != nil {
 			return err
 		}
-		return cmdClose(key)
+		return cmdClose(key, opts)
 
 	case "ls":
 		if hasHelpFlag(args[1:]) {
@@ -271,6 +282,10 @@ type getOptions struct {
 type openOptions struct {
 	DryRun bool
 	JSON   bool
+}
+
+type closeOptions struct {
+	JSON bool
 }
 
 type lsOptions struct {
@@ -384,12 +399,28 @@ func parseOpenArgs(args []string) (string, openOptions, error) {
 		}
 	}
 
-	// --json controls output format and, for now, is only supported alongside
-	// --dry-run. Structured output for the real creation path is migrated in a
-	// later issue, so --json without --dry-run is a usage error rather than a
-	// silently ignored flag.
-	if opts.JSON && !opts.DryRun {
-		return "", openOptions{}, fmt.Errorf("conflict: --json is only supported with --dry-run")
+	return key, opts, nil
+}
+
+func parseCloseArgs(args []string) (string, closeOptions, error) {
+	if len(args) == 0 {
+		return "", closeOptions{}, fmt.Errorf("usage: git kura close <key> [--json]")
+	}
+
+	key := args[0]
+	if err := validateKey(key); err != nil {
+		return "", closeOptions{}, err
+	}
+
+	var opts closeOptions
+	for _, flag := range args[1:] {
+		switch flag {
+		case "--json":
+			opts.JSON = true
+		default:
+			return "", closeOptions{}, exitCodeError(exitUsageError,
+				fmt.Errorf("usage: git kura close <key> [--json]: unexpected argument %q", flag))
+		}
 	}
 
 	return key, opts, nil
@@ -513,36 +544,60 @@ func cmdOpen(key string, opts openOptions) error {
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create worktree parent: %w", err)
+		return openFail(opts, fmt.Errorf("create worktree parent: %w", err))
 	}
 
 	cmd := exec.Command("git", "worktree", "add", path, "-b", branch, "HEAD")
 	cmd.Dir = repoRoot
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git worktree add: %w\n%s", err, out)
+		return openFail(opts, fmt.Errorf("git worktree add: %w\n%s", err, out))
 	}
+	createdWorktree := true
+	createdBranch := true
 
 	base, err := gitutil.HeadBranch(repoRoot)
 	if err != nil {
-		return fmt.Errorf("get base branch: %w", err)
+		return openFail(opts, fmt.Errorf("get base branch: %w", err))
 	}
 
 	meta := worktree.MetadataFile{RepositoryRoot: repoRoot, BaseBranch: base, WorktreePath: path}
 	metaPath, err := worktree.MetadataPath(repoRoot, key)
 	if err != nil {
-		return fmt.Errorf("resolve metadata path: %w", err)
+		return openFail(opts, fmt.Errorf("resolve metadata path: %w", err))
 	}
 	if err := os.MkdirAll(filepath.Dir(metaPath), 0o755); err != nil {
-		return fmt.Errorf("create metadata dir: %w", err)
+		return openFail(opts, fmt.Errorf("create metadata dir: %w", err))
 	}
 	metaData, _ := json.Marshal(meta)
 	if err := os.WriteFile(metaPath, metaData, 0o644); err != nil {
-		return fmt.Errorf("write metadata: %w", err)
+		return openFail(opts, fmt.Errorf("write metadata: %w", err))
+	}
+	createdMetadata := true
+
+	if !opts.JSON {
+		fmt.Println(path)
+		return nil
 	}
 
-	fmt.Println(path)
-	return nil
+	data := openDataJSON{
+		SchemaVersion:   1,
+		Key:             key,
+		Kind:            "worktree",
+		Branch:          branch,
+		WorktreePath:    path,
+		RepositoryRoot:  repoRoot,
+		BaseBranch:      base,
+		Exists:          true,
+		Dirty:           false,
+		CreatedWorktree: &createdWorktree,
+		CreatedBranch:   &createdBranch,
+		CreatedMetadata: &createdMetadata,
+	}
+	if err := validateData(openDataSchema, data); err != nil {
+		return err
+	}
+	return emitResult(renderJSON, Result{Command: commandOpen, Data: data})
 }
 
 // cmdOpenDryRun evaluates what open would create for key without any side
@@ -557,7 +612,7 @@ func cmdOpenDryRun(opts openOptions, repoRoot, key, path, branch string) error {
 		return openFail(opts, fmt.Errorf("get base branch: %w", err))
 	}
 
-	data := worktreeJSON{
+	data := openDataJSON{
 		SchemaVersion:  1,
 		Key:            key,
 		Kind:           "worktree",
@@ -568,7 +623,7 @@ func cmdOpenDryRun(opts openOptions, repoRoot, key, path, branch string) error {
 		Exists:         false,
 		Dirty:          false,
 	}
-	if err := validateData(openDryRunDataSchema, data); err != nil {
+	if err := validateData(openDataSchema, data); err != nil {
 		return err
 	}
 
@@ -581,11 +636,11 @@ func cmdOpenDryRun(opts openOptions, repoRoot, key, path, branch string) error {
 	return emitResult(mode, Result{Command: commandOpen, Data: data, Warnings: warnings})
 }
 
-// openFail routes an open failure to the right output. Only the dry-run JSON
-// request is migrated onto the framework, so it renders an ok:false envelope on
-// stdout; every other open invocation keeps the existing plain-error behavior.
+// openFail routes an open failure to the right output. JSON requests render an
+// ok:false envelope on stdout; every other open invocation keeps the existing
+// plain-error behavior.
 func openFail(opts openOptions, err error) error {
-	if !opts.DryRun || !opts.JSON {
+	if !opts.JSON {
 		return err
 	}
 	return emitError(renderJSON, toCommandError(commandOpen, err))
@@ -806,20 +861,23 @@ func lsFail(opts lsOptions, err error) error {
 // fixed order — worktree, branch, seals, metadata — and abort before touching
 // paths.json if the worktree or branch cleanup fails, so a key's seals are only
 // released once its worktree and branch are actually gone.
-func cmdClose(key string) error {
+func cmdClose(key string, opts closeOptions) error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
-		return fmt.Errorf("not inside a git repository")
+		return closeFail(opts, nil, "preflight", fmt.Errorf("not inside a git repository"))
 	}
 
 	path, err := worktree.Path(repoRoot, key)
 	if err != nil {
-		return fmt.Errorf("resolve worktree path: %w", err)
+		return closeFail(opts, nil, "preflight", fmt.Errorf("resolve worktree path: %w", err))
 	}
+	branch := worktree.BranchName(key)
+
+	partial := &closeDataJSON{Key: key, WorktreePath: path, Branch: branch}
 
 	storeFile, lockFile, err := pathsSealStore(repoRoot)
 	if err != nil {
-		return err
+		return closeFail(opts, partial, "preflight", err)
 	}
 
 	// Acquire the seal store lock before any destructive cleanup. A lock that
@@ -827,11 +885,11 @@ func cmdClose(key string) error {
 	// worktree, branch, paths.json, and metadata untouched.
 	timeout, err := resolveSealLockTimeout(repoRoot)
 	if err != nil {
-		return err
+		return closeFail(opts, partial, "preflight", err)
 	}
 	release, err := acquireSealLock(lockFile, timeout)
 	if err != nil {
-		return err
+		return closeFail(opts, partial, "preflight", err)
 	}
 	defer release()
 
@@ -840,7 +898,11 @@ func cmdClose(key string) error {
 	// store aborts close before any worktree/branch/paths.json/metadata change.
 	store, err := readSealStore(storeFile)
 	if err != nil {
-		return err
+		phase := "read-store"
+		if errors.As(err, new(sealStoreValidationErr)) {
+			phase = "validate-store"
+		}
+		return closeStoreFail(opts, partial, phase, storeFile, err)
 	}
 
 	// 1. Worktree cleanup. A missing worktree directory is a no-op, so stale
@@ -852,58 +914,111 @@ func cmdClose(key string) error {
 		cmd.Dir = repoRoot
 		out, removeErr := cmd.CombinedOutput()
 		if removeErr != nil {
-			return fmt.Errorf("git worktree remove: %w\n%s", removeErr, out)
+			return closeFail(opts, partial, "remove-worktree", fmt.Errorf("git worktree remove: %w\n%s", removeErr, out))
 		}
+		partial.RemovedWorktree = true
 	} else if os.IsNotExist(statErr) {
 		if err := gitutil.PruneWorktrees(repoRoot); err != nil {
-			return err
+			return closeFail(opts, partial, "remove-worktree", err)
 		}
 	} else {
-		return fmt.Errorf("check worktree path: %w", statErr)
+		return closeFail(opts, partial, "remove-worktree", fmt.Errorf("check worktree path: %w", statErr))
 	}
 
 	// 2. Kura-managed branch cleanup. A branch that is already gone is a no-op; a
 	//    branch that exists but cannot be deleted (e.g. unmerged commits) aborts
 	//    close before paths.json is updated, so the key's seals are preserved.
-	branch := worktree.BranchName(key)
 	branchExists, err := gitutil.BranchExists(repoRoot, branch)
 	if err != nil {
-		return err
+		return closeFail(opts, partial, "remove-branch", err)
 	}
 	if branchExists {
 		if err := gitutil.DeleteBranch(repoRoot, branch); err != nil {
-			return err
+			return closeFail(opts, partial, "remove-branch", err)
 		}
+		partial.RemovedBranch = true
 	}
 
 	// 3. Release every seal claimed by this key, leaving other keys' claims
 	//    untouched. Only rewrite paths.json when something actually changed.
-	removed := false
+	releasedCount := 0
 	for sealedPath, entry := range store.Paths {
 		if entry.Key == key {
 			delete(store.Paths, sealedPath)
-			removed = true
+			releasedCount++
 		}
 	}
-	if removed {
+	if releasedCount > 0 {
 		if err := writeSealStore(storeFile, store); err != nil {
-			return fmt.Errorf("update seal store: %w", err)
+			return closeFail(opts, partial, "release-seals", fmt.Errorf("update seal store: %w", err))
 		}
 	}
+	partial.ReleasedSealCount = releasedCount
 
 	// 4. Metadata cleanup. Failure here does not roll back the completed
 	//    worktree/branch/seal cleanup; re-running close retries just this step,
 	//    which recovers state left behind by a manual deletion or earlier
 	//    incomplete close.
-	meta, err := worktree.MetadataPath(repoRoot, key)
+	metaPath, err := worktree.MetadataPath(repoRoot, key)
 	if err != nil {
-		return fmt.Errorf("resolve metadata path: %w", err)
+		return closeFail(opts, partial, "remove-metadata", fmt.Errorf("resolve metadata path: %w", err))
 	}
-	if err := os.Remove(meta); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove metadata: %w", err)
+	if err := os.Remove(metaPath); err != nil {
+		if !os.IsNotExist(err) {
+			return closeFail(opts, partial, "remove-metadata", fmt.Errorf("remove metadata: %w", err))
+		}
+		// already absent — RemovedMetadata stays false
+	} else {
+		partial.RemovedMetadata = true
 	}
 
-	return nil
+	if !opts.JSON {
+		return nil
+	}
+	if err := validateData(closeDataSchema, *partial); err != nil {
+		return err
+	}
+	return emitResult(renderJSON, Result{Command: commandClose, Data: *partial})
+}
+
+// closeFail routes a close failure to the right output. JSON requests render an
+// ok:false envelope on stdout with partial-effect details; non-JSON requests
+// keep the existing plain-error behavior.
+func closeFail(opts closeOptions, partial *closeDataJSON, phase string, err error) error {
+	if !opts.JSON {
+		return err
+	}
+	var details *closeErrorDetails
+	if partial != nil {
+		details = &closeErrorDetails{Phase: phase, PartialResult: partial}
+	} else {
+		details = &closeErrorDetails{Phase: phase}
+	}
+	cerr := toCommandError(commandClose, err)
+	cerr.Details = details
+	return emitError(renderJSON, cerr)
+}
+
+// closeStoreFail routes a close store-level failure (read-store or validate-store)
+// to the right output, including error.details.storeError as required by Issue #63.
+func closeStoreFail(opts closeOptions, partial *closeDataJSON, phase string, storeFile string, err error) error {
+	if !opts.JSON {
+		return err
+	}
+	statusMap := map[string]string{
+		"read-store":     "store-read-error",
+		"validate-store": "store-validation-error",
+	}
+	se := &sealStoreError{Status: statusMap[phase], Path: storeFile}
+	var details *closeErrorDetails
+	if partial != nil {
+		details = &closeErrorDetails{Phase: phase, PartialResult: partial, StoreError: se}
+	} else {
+		details = &closeErrorDetails{Phase: phase, StoreError: se}
+	}
+	cerr := toCommandError(commandClose, err)
+	cerr.Details = details
+	return emitError(renderJSON, cerr)
 }
 
 type worktreeJSON struct {
@@ -916,6 +1031,51 @@ type worktreeJSON struct {
 	BaseBranch     string `json:"baseBranch"     toon:"baseBranch"`
 	Exists         bool   `json:"exists"         toon:"exists"`
 	Dirty          bool   `json:"dirty"          toon:"dirty"`
+}
+
+// openDataJSON is the data payload for open --json (both dry-run and actual).
+// Effect fields (CreatedWorktree, CreatedBranch, CreatedMetadata) are present
+// only for actual open; dry-run omits them.
+type openDataJSON struct {
+	SchemaVersion   int    `json:"schemaVersion"`
+	Key             string `json:"key"`
+	Kind            string `json:"kind"`
+	Branch          string `json:"branch"`
+	WorktreePath    string `json:"worktreePath"`
+	RepositoryRoot  string `json:"repositoryRoot"`
+	BaseBranch      string `json:"baseBranch"`
+	Exists          bool   `json:"exists"`
+	Dirty           bool   `json:"dirty"`
+	CreatedWorktree *bool  `json:"createdWorktree,omitempty"`
+	CreatedBranch   *bool  `json:"createdBranch,omitempty"`
+	CreatedMetadata *bool  `json:"createdMetadata,omitempty"`
+}
+
+func (d openDataJSON) RenderHuman(w io.Writer) error {
+	_, err := fmt.Fprintf(w,
+		"worktree path:   %s\nbranch:          %s\nrepository root: %s\nbase branch:     %s\n",
+		d.WorktreePath, d.Branch, d.RepositoryRoot, d.BaseBranch)
+	return err
+}
+
+// closeDataJSON is the success payload for close --json.
+type closeDataJSON struct {
+	Key               string `json:"key"`
+	WorktreePath      string `json:"worktreePath"`
+	Branch            string `json:"branch"`
+	RemovedWorktree   bool   `json:"removedWorktree"`
+	RemovedBranch     bool   `json:"removedBranch"`
+	RemovedMetadata   bool   `json:"removedMetadata"`
+	ReleasedSealCount int    `json:"releasedSealCount"`
+}
+
+func (d closeDataJSON) RenderHuman(_ io.Writer) error { return nil }
+
+// closeErrorDetails carries partial effects from a failed close --json.
+type closeErrorDetails struct {
+	Phase         string          `json:"phase"`
+	PartialResult *closeDataJSON  `json:"partialResult,omitempty"`
+	StoreError    *sealStoreError `json:"storeError,omitempty"`
 }
 
 // RenderHuman writes the human-readable form of the worktree data. It is used by

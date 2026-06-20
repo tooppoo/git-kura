@@ -67,6 +67,21 @@ func TestRepositoryContext(t *testing.T) {
 		assertPathMissing(t, filepath.Join(outside, ".git"))
 		assertPathMissing(t, expectedStateDir(outside))
 	})
+
+	// open --json and close --json outside a repository produce ok:false envelopes.
+	t.Run("open json fails outside repository", func(t *testing.T) {
+		result := cli.gitKura(outside, "open", "51", "--json")
+		requireNonZeroExitCode(t, result)
+		requireEmptyStderr(t, result)
+		requireErrorEnvelope(t, result.stdout, "open")
+	})
+
+	t.Run("close json fails outside repository", func(t *testing.T) {
+		result := cli.gitKura(outside, "close", "51", "--json")
+		requireNonZeroExitCode(t, result)
+		requireEmptyStderr(t, result)
+		requireErrorEnvelope(t, result.stdout, "close")
+	})
 }
 
 func TestKeyValidationRejectsUnsafeKeysWithoutFilesystemChanges(t *testing.T) {
@@ -621,20 +636,305 @@ func TestGetScalarAndJSONCombinationIsUsageError(t *testing.T) {
 	}
 }
 
-func TestOpenJSONWithoutDryRunIsUsageError(t *testing.T) {
+func TestOpenJSONWithoutDryRun(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
-	// Structured output for the real creation path is out of scope for this
-	// migration, so --json without --dry-run is a usage error rather than a
-	// silently ignored flag.
+	// open --json (without --dry-run) performs the real creation and returns a
+	// JSON envelope with ok:true and the effect fields set.
 	result := cli.gitKura(repo, "open", "51", "--json")
-	requireExitCode(t, result, 2)
-	requireEmptyStdout(t, result)
-	if result.stderr == "" {
-		t.Fatal("stderr = empty, want a usage error message")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "open", openDataSchema)
+	if data["branch"] != "51" {
+		t.Fatalf("branch = %v, want 51", data["branch"])
+	}
+	createdWorktree, ok := data["createdWorktree"].(bool)
+	if !ok || !createdWorktree {
+		t.Fatalf("createdWorktree = %v, want true", data["createdWorktree"])
+	}
+	createdBranch, ok := data["createdBranch"].(bool)
+	if !ok || !createdBranch {
+		t.Fatalf("createdBranch = %v, want true", data["createdBranch"])
+	}
+	createdMetadata, ok := data["createdMetadata"].(bool)
+	if !ok || !createdMetadata {
+		t.Fatalf("createdMetadata = %v, want true", data["createdMetadata"])
+	}
+	assertPathExists(t, expectedWorktreePath(repo, "51"))
+}
+
+func TestOpenJSONConformsToEnvelopeSchema(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "open", "51", "--json")
+	requireExitCode(t, result, 0)
+	requireConformsToEnvelopeSchema(t, result.stdout)
+}
+
+func TestCloseJSON(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+
+	result := cli.gitKura(repo, "close", "51", "--json")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "close", closeDataSchema)
+	if data["key"] != "51" {
+		t.Fatalf("key = %v, want 51", data["key"])
+	}
+	if data["removedWorktree"] != true {
+		t.Fatalf("removedWorktree = %v, want true", data["removedWorktree"])
+	}
+	if data["removedBranch"] != true {
+		t.Fatalf("removedBranch = %v, want true", data["removedBranch"])
+	}
+	if data["removedMetadata"] != true {
+		t.Fatalf("removedMetadata = %v, want true", data["removedMetadata"])
+	}
+	if data["releasedSealCount"] != float64(0) {
+		t.Fatalf("releasedSealCount = %v, want 0", data["releasedSealCount"])
 	}
 	assertPathMissing(t, expectedWorktreePath(repo, "51"))
+}
+
+func TestCloseJSONConformsToEnvelopeSchema(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+
+	result := cli.gitKura(repo, "close", "51", "--json")
+	requireExitCode(t, result, 0)
+	requireConformsToEnvelopeSchema(t, result.stdout)
+}
+
+func TestSealClaimJSON(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "task1")
+
+	// Create the file in the managed worktree: seal paths are relative to the
+	// worktree root (git rev-parse --show-toplevel from the worktree directory).
+	if err := os.WriteFile(filepath.Join(wt, "target.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := cli.gitKura(wt, "seal", "claim", "--json", "target.txt")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.claim", sealClaimDataSchema)
+	if data["currentKey"] != "task1" {
+		t.Fatalf("currentKey = %v, want task1", data["currentKey"])
+	}
+	paths, _ := data["paths"].([]any)
+	if len(paths) != 1 {
+		t.Fatalf("paths len = %d, want 1", len(paths))
+	}
+	item := paths[0].(map[string]any)
+	if item["status"] != "claimed" {
+		t.Fatalf("paths[0].status = %v, want claimed", item["status"])
+	}
+}
+
+func TestSealClaimJSONIdempotent(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "task1")
+
+	if err := os.WriteFile(filepath.Join(wt, "target.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Claim once to set up state.
+	requireExitCode(t, cli.gitKura(wt, "seal", "claim", "target.txt"), 0)
+
+	// Claim again with --json: already-owned is non-blocking.
+	result := cli.gitKura(wt, "seal", "claim", "--json", "target.txt")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.claim", sealClaimDataSchema)
+	paths, _ := data["paths"].([]any)
+	if len(paths) != 1 {
+		t.Fatalf("paths len = %d, want 1", len(paths))
+	}
+	if paths[0].(map[string]any)["status"] != "already-owned" {
+		t.Fatalf("paths[0].status = %v, want already-owned", paths[0].(map[string]any)["status"])
+	}
+}
+
+func TestSealClaimJSONConflictErrorEnvelope(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt1 := cli.openWorktree(t, repo, "task1")
+	wt2 := cli.openWorktree(t, repo, "task2")
+
+	// Create in both worktrees: claim checks file existence in each worktree root.
+	for _, wt := range []string{wt1, wt2} {
+		if err := os.WriteFile(filepath.Join(wt, "shared.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// task1 claims the file.
+	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "shared.txt"), 0)
+
+	// task2 tries to claim it with --json → error envelope with details.
+	result := cli.gitKura(wt2, "seal", "claim", "--json", "shared.txt")
+	requireNonZeroExitCode(t, result)
+	requireEmptyStderr(t, result)
+
+	env := requireErrorEnvelope(t, result.stdout, "seal.claim")
+	errObj := env["error"].(map[string]any)
+	if errObj["code"] != "seal-conflict" {
+		t.Fatalf("error.code = %v, want seal-conflict", errObj["code"])
+	}
+	details, ok := errObj["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("error.details missing or not an object: %v", errObj["details"])
+	}
+	if details["phase"] != "preflight" {
+		t.Fatalf("details.phase = %v, want preflight", details["phase"])
+	}
+	if details["currentKey"] != "task2" {
+		t.Fatalf("details.currentKey = %v, want task2", details["currentKey"])
+	}
+	conflicts, ok := details["conflicts"].([]any)
+	if !ok || len(conflicts) == 0 {
+		t.Fatalf("details.conflicts missing or empty: %v", details["conflicts"])
+	}
+	c := conflicts[0].(map[string]any)
+	if c["path"] != "shared.txt" {
+		t.Fatalf("conflicts[0].path = %v, want shared.txt", c["path"])
+	}
+	if c["ownerKey"] != "task1" {
+		t.Fatalf("conflicts[0].ownerKey = %v, want task1", c["ownerKey"])
+	}
+	if c["requestedKey"] != "task2" {
+		t.Fatalf("conflicts[0].requestedKey = %v, want task2", c["requestedKey"])
+	}
+}
+
+func TestSealClaimJSONConformsToEnvelopeSchema(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "task1")
+
+	if err := os.WriteFile(filepath.Join(wt, "target.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := cli.gitKura(wt, "seal", "claim", "--json", "target.txt")
+	requireExitCode(t, result, 0)
+	requireConformsToEnvelopeSchema(t, result.stdout)
+}
+
+func TestSealUnclaimJSON(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "task1")
+
+	if err := os.WriteFile(filepath.Join(wt, "target.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	requireExitCode(t, cli.gitKura(wt, "seal", "claim", "target.txt"), 0)
+
+	result := cli.gitKura(wt, "seal", "unclaim", "--json", "target.txt")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.unclaim", sealUnclaimDataSchema)
+	if data["currentKey"] != "task1" {
+		t.Fatalf("currentKey = %v, want task1", data["currentKey"])
+	}
+	paths, _ := data["paths"].([]any)
+	if len(paths) != 1 {
+		t.Fatalf("paths len = %d, want 1", len(paths))
+	}
+	if paths[0].(map[string]any)["status"] != "released" {
+		t.Fatalf("paths[0].status = %v, want released", paths[0].(map[string]any)["status"])
+	}
+}
+
+func TestSealUnclaimJSONIdempotent(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "task1")
+
+	// Unclaim doesn't check file existence, so the file location doesn't matter;
+	// use the worktree dir for consistency.
+	if err := os.WriteFile(filepath.Join(wt, "target.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Unclaim a path that was never claimed: not-claimed is non-blocking.
+	result := cli.gitKura(wt, "seal", "unclaim", "--json", "target.txt")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	data := requireSuccessEnvelopeData(t, result.stdout, "seal.unclaim", sealUnclaimDataSchema)
+	paths, _ := data["paths"].([]any)
+	if len(paths) != 1 {
+		t.Fatalf("paths len = %d, want 1", len(paths))
+	}
+	if paths[0].(map[string]any)["status"] != "not-claimed" {
+		t.Fatalf("paths[0].status = %v, want not-claimed", paths[0].(map[string]any)["status"])
+	}
+}
+
+func TestSealUnclaimJSONConflictErrorEnvelope(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt1 := cli.openWorktree(t, repo, "task1")
+	wt2 := cli.openWorktree(t, repo, "task2")
+
+	// File only needs to exist in wt1 for the claim; unclaim doesn't stat-check.
+	if err := os.WriteFile(filepath.Join(wt1, "shared.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "shared.txt"), 0)
+
+	// task2 tries to unclaim task1's path → error envelope.
+	result := cli.gitKura(wt2, "seal", "unclaim", "--json", "shared.txt")
+	requireNonZeroExitCode(t, result)
+	requireEmptyStderr(t, result)
+
+	env := requireErrorEnvelope(t, result.stdout, "seal.unclaim")
+	errObj := env["error"].(map[string]any)
+	if errObj["code"] != "seal-conflict" {
+		t.Fatalf("error.code = %v, want seal-conflict", errObj["code"])
+	}
+	details, ok := errObj["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("error.details missing or not an object: %v", errObj["details"])
+	}
+	if details["currentKey"] != "task2" {
+		t.Fatalf("details.currentKey = %v, want task2", details["currentKey"])
+	}
+	conflicts, ok := details["conflicts"].([]any)
+	if !ok || len(conflicts) == 0 {
+		t.Fatalf("details.conflicts missing or empty: %v", details["conflicts"])
+	}
+}
+
+func TestSealUnclaimJSONConformsToEnvelopeSchema(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "task1")
+
+	if err := os.WriteFile(filepath.Join(wt, "target.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	requireExitCode(t, cli.gitKura(wt, "seal", "claim", "target.txt"), 0)
+
+	result := cli.gitKura(wt, "seal", "unclaim", "--json", "target.txt")
+	requireExitCode(t, result, 0)
+	requireConformsToEnvelopeSchema(t, result.stdout)
 }
 
 func TestLsNoOpenWorktrees(t *testing.T) {
@@ -1455,6 +1755,42 @@ func TestCloseMalformedPathsJSONAborts(t *testing.T) {
 	}
 	if string(data) != "{not json" {
 		t.Fatalf("paths.json = %q, want it left unchanged", string(data))
+	}
+}
+
+func TestCloseMalformedPathsJSONAbortsWithEnvelope(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	cli.openWorktree(t, repo, "key1")
+
+	storeFile, _, err := pathsSealStore(repo)
+	if err != nil {
+		t.Fatalf("pathsSealStore: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(storeFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, storeFile, "{not json")
+
+	result := cli.gitKura(repo, "close", "key1", "--json")
+	requireNonZeroExitCode(t, result)
+	requireEmptyStderr(t, result)
+
+	env := requireErrorEnvelope(t, result.stdout, "close")
+	errObj := env["error"].(map[string]any)
+	details, ok := errObj["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("error.details missing or not an object: %v", errObj["details"])
+	}
+	if details["phase"] != "validate-store" {
+		t.Fatalf("details.phase = %v, want validate-store", details["phase"])
+	}
+	storeErr, ok := details["storeError"].(map[string]any)
+	if !ok {
+		t.Fatalf("details.storeError missing or not an object: %v", details["storeError"])
+	}
+	if storeErr["status"] != "store-validation-error" {
+		t.Fatalf("storeError.status = %v, want store-validation-error", storeErr["status"])
 	}
 }
 
