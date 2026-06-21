@@ -96,7 +96,6 @@ func TestSkillUninstallDoesNotRemoveParentDir(t *testing.T) {
 	assertPathExists(t, otherFile)
 }
 
-
 func TestSkillUninstallWhenFileAlreadyDeleted(t *testing.T) {
 	repo := toolsTestRepo(t)
 	content := []byte("skill content")
