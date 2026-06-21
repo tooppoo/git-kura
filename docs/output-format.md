@@ -15,14 +15,6 @@ Every field in a structured output payload — success `data`, `warnings[].detai
 | **human-conditional** | Shown in human output only when a warning or error condition is present. |
 | **machine-only** | Omitted from human output. Includes envelope metadata (`schemaVersion`, `command`, empty arrays) that a human reader does not need. |
 
-### Output parity rules
-
-- Human output is rendered from the same structured result that feeds JSON output — not from a separate code path.
-- Every structured success data type must implement `HumanRenderable`.
-- Human output must not silently drop any **human-required** field.
-- Human output must not silently drop any **human-conditional** field when the triggering condition is present.
-- **machine-only** fields may be omitted from human output unconditionally.
-
 ### Diagnostic command convention
 
 Some commands (seal test, seal doctor) produce a business result that is either
