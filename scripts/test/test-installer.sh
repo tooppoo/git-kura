@@ -9,7 +9,7 @@ FAIL_COUNT=0
 pass() { PASS_COUNT=$((PASS_COUNT + 1)); printf '[PASS] %s\n' "$1"; }
 fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); printf '[FAIL] %s\n' "$1" >&2; }
 
-INSTALLER="$(cd "$(dirname "$0")/.." && pwd)/install.sh"
+INSTALLER="$(cd "$(dirname "$0")/../.." && pwd)/install.sh"
 
 if [ ! -f "$INSTALLER" ]; then
     printf 'install.sh not found at %s\n' "$INSTALLER" >&2
