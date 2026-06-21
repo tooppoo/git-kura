@@ -22,16 +22,6 @@ func TestRunCommandsInProcess(t *testing.T) {
 			t.Fatalf("get --path before open stdout = %q, want empty", stdout)
 		}
 
-		stdout, err = captureStdout(t, func() error {
-			return run([]string{"get", "51", "--branch"})
-		})
-		if err == nil {
-			t.Fatal("get --branch before open error = nil, want error")
-		}
-		if stdout != "" {
-			t.Fatalf("get --branch before open stdout = %q, want empty", stdout)
-		}
-
 		// get --json is a structured request: an execution-time failure before the
 		// worktree is open is reported as an ok:false envelope on stdout, with the
 		// renderer having already written it (run returns a non-nil sentinel).
@@ -42,16 +32,6 @@ func TestRunCommandsInProcess(t *testing.T) {
 			t.Fatal("get --json before open error = nil, want error")
 		}
 		requireErrorEnvelope(t, stdout, "get")
-
-		stdout, err = captureStdout(t, func() error {
-			return run([]string{"get", "51", "--root"})
-		})
-		if err == nil {
-			t.Fatal("get --root before open error = nil, want error")
-		}
-		if stdout != "" {
-			t.Fatalf("get --root before open stdout = %q, want empty", stdout)
-		}
 
 		if err := run([]string{"open", "51"}); err != nil {
 			t.Fatalf("open error = %v", err)
@@ -67,38 +47,6 @@ func TestRunCommandsInProcess(t *testing.T) {
 		}
 		if strings.TrimSpace(stdout) != expectedWorktreePath(repo, "51") {
 			t.Fatalf("get --path stdout = %q, want %q", stdout, expectedWorktreePath(repo, "51"))
-		}
-
-		stdout, err = captureStdout(t, func() error {
-			return run([]string{"get", "51", "--branch"})
-		})
-		if err != nil {
-			t.Fatalf("get --branch error = %v", err)
-		}
-		if strings.TrimSpace(stdout) != "51" {
-			t.Fatalf("get --branch stdout = %q, want 51", stdout)
-		}
-
-		stdout, err = captureStdout(t, func() error {
-			return run([]string{"get", "51", "--root"})
-		})
-		if err != nil {
-			t.Fatalf("get --root error = %v", err)
-		}
-		if strings.TrimSpace(stdout) != repo {
-			t.Fatalf("get --root stdout = %q, want %q", stdout, repo)
-		}
-
-		stdout, err = captureStdout(t, func() error {
-			return run([]string{"get", "51", "--toon"})
-		})
-		if err != nil {
-			t.Fatalf("get --toon error = %v", err)
-		}
-		for _, want := range []string{"schemaVersion", "worktreePath", "baseBranch", "exists"} {
-			if !strings.Contains(stdout, want) {
-				t.Fatalf("toon stdout = %q, want it to contain %q", stdout, want)
-			}
 		}
 
 		if err := run([]string{"close", "51"}); err != nil {

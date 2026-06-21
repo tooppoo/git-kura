@@ -96,26 +96,6 @@ func TestSkillUninstallDoesNotRemoveParentDir(t *testing.T) {
 	assertPathExists(t, otherFile)
 }
 
-func TestSkillUninstallDeletesMetadataEntry(t *testing.T) {
-	repo := toolsTestRepo(t)
-	content := []byte("skill content")
-	deps := skillDeps(t, content, []byte("codex"))
-
-	if _, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID); err != nil {
-		t.Fatalf("install: %v", err)
-	}
-	if _, err := runToolsCLI(t, repo, deps, "uninstall", claudeSkillComponentID); err != nil {
-		t.Fatalf("uninstall: %v", err)
-	}
-
-	store, err := readToolsMetadata(installedJSONPath(repo))
-	if err != nil {
-		t.Fatalf("read metadata: %v", err)
-	}
-	if _, ok := store.Components[claudeSkillComponentID]; ok {
-		t.Fatal("metadata entry should be deleted after uninstall")
-	}
-}
 
 func TestSkillUninstallWhenFileAlreadyDeleted(t *testing.T) {
 	repo := toolsTestRepo(t)

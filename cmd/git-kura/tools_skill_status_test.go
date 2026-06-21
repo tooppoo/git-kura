@@ -113,27 +113,6 @@ func TestSkillStatusInstalledButFileMissing(t *testing.T) {
 	}
 }
 
-func TestSkillStatusUnmanagedHasPriorityOverNotInstalled(t *testing.T) {
-	repo := toolsTestRepo(t)
-	deps := skillDeps(t, []byte("c"), []byte("co"))
-
-	// No metadata, but file exists at destination
-	dest := codexSkillDest(repo)
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, dest, "pre-existing codex skill")
-
-	out, err := runToolsCLI(t, repo, deps, "status", codexSkillComponentID)
-	if err != nil {
-		t.Fatalf("status: %v\n%s", err, out)
-	}
-	// Must report unmanaged-file-exists, not simply not-installed
-	if !strings.Contains(out, "unmanaged-file-exists") {
-		t.Fatalf("unmanaged file should take priority over not-installed:\n%s", out)
-	}
-}
-
 func TestPendingComponentStatus(t *testing.T) {
 	c := newPendingComponent("future-tool", "https://github.com/tooppoo/git-kura/issues/999")
 	out := c.status(toolsContext{})

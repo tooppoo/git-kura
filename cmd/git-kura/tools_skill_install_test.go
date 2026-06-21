@@ -7,51 +7,57 @@ import (
 	"testing"
 )
 
-func TestClaudeSkillInstallCreatesFile(t *testing.T) {
-	repo := toolsTestRepo(t)
-	content := []byte("claude skill content")
-	deps := skillDeps(t, content, []byte("codex skill content"))
-
-	out, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID)
-	if err != nil {
-		t.Fatalf("install: %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "created") {
-		t.Fatalf("first install should report created:\n%s", out)
-	}
-
-	dest := claudeSkillDest(repo)
-	assertPathExists(t, dest)
-	got, readErr := os.ReadFile(dest)
-	if readErr != nil {
-		t.Fatalf("read installed file: %v", readErr)
-	}
-	if string(got) != string(content) {
-		t.Fatalf("installed content = %q, want %q", got, content)
-	}
-}
-
-func TestCodexSkillInstallCreatesFile(t *testing.T) {
-	repo := toolsTestRepo(t)
-	content := []byte("codex skill content")
-	deps := skillDeps(t, []byte("claude skill content"), content)
-
-	out, err := runToolsCLI(t, repo, deps, "install", codexSkillComponentID)
-	if err != nil {
-		t.Fatalf("install: %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "created") {
-		t.Fatalf("first install should report created:\n%s", out)
+func TestSkillInstallCreatesFile(t *testing.T) {
+	cases := []struct {
+		name        string
+		componentID string
+		content     []byte
+		deps        func(*testing.T, []byte) toolsDeps
+		dest        func(string) string
+	}{
+		{
+			name:        "claude",
+			componentID: claudeSkillComponentID,
+			content:     []byte("claude skill content"),
+			deps: func(t *testing.T, content []byte) toolsDeps {
+				return skillDeps(t, content, []byte("codex skill content"))
+			},
+			dest: claudeSkillDest,
+		},
+		{
+			name:        "codex",
+			componentID: codexSkillComponentID,
+			content:     []byte("codex skill content"),
+			deps: func(t *testing.T, content []byte) toolsDeps {
+				return skillDeps(t, []byte("claude skill content"), content)
+			},
+			dest: codexSkillDest,
+		},
 	}
 
-	dest := codexSkillDest(repo)
-	assertPathExists(t, dest)
-	got, readErr := os.ReadFile(dest)
-	if readErr != nil {
-		t.Fatalf("read installed file: %v", readErr)
-	}
-	if string(got) != string(content) {
-		t.Fatalf("installed content = %q, want %q", got, content)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := toolsTestRepo(t)
+			deps := tc.deps(t, tc.content)
+
+			out, err := runToolsCLI(t, repo, deps, "install", tc.componentID)
+			if err != nil {
+				t.Fatalf("install: %v\n%s", err, out)
+			}
+			if !strings.Contains(out, "created") {
+				t.Fatalf("first install should report created:\n%s", out)
+			}
+
+			dest := tc.dest(repo)
+			assertPathExists(t, dest)
+			got, readErr := os.ReadFile(dest)
+			if readErr != nil {
+				t.Fatalf("read installed file: %v", readErr)
+			}
+			if string(got) != string(tc.content) {
+				t.Fatalf("installed content = %q, want %q", got, tc.content)
+			}
+		})
 	}
 }
 
