@@ -1003,8 +1003,14 @@ func TestSealClaimSucceeds(t *testing.T) {
 
 	result := cli.gitKura(wt, "seal", "claim", "tracked.txt")
 	requireExitCode(t, result, 0)
-	requireEmptyStdout(t, result)
 	requireEmptyStderr(t, result)
+	// Human output shows per-path claim status.
+	if !strings.Contains(result.stdout, "tracked.txt") {
+		t.Fatalf("stdout = %q, want it to contain claimed path", result.stdout)
+	}
+	if !strings.Contains(result.stdout, "claimed") {
+		t.Fatalf("stdout = %q, want it to mention 'claimed'", result.stdout)
+	}
 }
 
 func TestSealClaimIsIdempotent(t *testing.T) {
@@ -1246,11 +1252,12 @@ func TestSealTestOutsideWorktreeFails(t *testing.T) {
 
 	// The main checkout is a git repository but not a managed worktree. The
 	// failure must be a context error, distinguishable from a seal-conflict.
+	// seal-conflict (business result) goes to stdout; context errors go to stderr.
 	result := cli.gitKura(repo, "seal", "test", "tracked.txt")
 	requireNonZeroExitCode(t, result)
 	requireStderrContains(t, result, "managed worktree")
-	if strings.Contains(result.stderr, "seal-conflict:") {
-		t.Fatalf("context error must not look like a seal-conflict: %s", result.stderr)
+	if strings.Contains(result.stderr, "seal-conflict:") || strings.Contains(result.stdout, "seal-conflict:") {
+		t.Fatalf("context error must not look like a seal-conflict: stdout=%q stderr=%q", result.stdout, result.stderr)
 	}
 }
 
@@ -1303,8 +1310,9 @@ func TestSealTestRejectsDifferentKey(t *testing.T) {
 
 	result := cli.gitKura(wt2, "seal", "test", "tracked.txt")
 	requireExitCode(t, result, exitSealConflict)
-	requireStderrContains(t, result, "seal-conflict:")
-	requireStderrContains(t, result, "key1")
+	// seal test conflict is a business result (ok:true, passed:false) → stdout.
+	requireStdoutContains(t, result, "seal-conflict:")
+	requireStdoutContains(t, result, "key1")
 }
 
 func TestSealTestConflictListsAllSealedPaths(t *testing.T) {
@@ -1323,10 +1331,11 @@ func TestSealTestConflictListsAllSealedPaths(t *testing.T) {
 	// third.txt is safe; the two foreign claims must both be reported.
 	result := cli.gitKura(wt3, "seal", "test", "tracked.txt", "second.txt", "third.txt")
 	requireExitCode(t, result, exitSealConflict)
-	requireStderrContains(t, result, "tracked.txt")
-	requireStderrContains(t, result, "key1")
-	requireStderrContains(t, result, "second.txt")
-	requireStderrContains(t, result, "key2")
+	// All conflicts go to stdout as a business result.
+	requireStdoutContains(t, result, "tracked.txt")
+	requireStdoutContains(t, result, "key1")
+	requireStdoutContains(t, result, "second.txt")
+	requireStdoutContains(t, result, "key2")
 }
 
 func TestSealTestRejectsPathOutsideRepo(t *testing.T) {
@@ -1474,9 +1483,10 @@ func TestSealDoctorDetectsInvalidStoreWithExitCode7(t *testing.T) {
 
 	result := cli.gitKura(repo, "seal", "doctor")
 	requireExitCode(t, result, exitSealDoctorError)
-	requireEmptyStdout(t, result)
-	requireStderrContains(t, result, "seal-doctor-error:")
-	requireStderrContains(t, result, `src\\a.go`)
+	requireEmptyStderr(t, result)
+	// Unhealthy is a business result (ok:true, healthy:false) → stdout.
+	requireStdoutContains(t, result, "seal-doctor-error:")
+	requireStdoutContains(t, result, `src\\a.go`)
 }
 
 func TestSealDoctorDoesNotCreateOrAcquireLock(t *testing.T) {

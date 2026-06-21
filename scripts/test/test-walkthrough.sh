@@ -78,7 +78,7 @@ main() {
 	step "seal test detects conflicts and clean paths"
 	gk "$BETA" seal test file1.txt
 	expect_rc 6 "seal test reports a conflict for file1.txt"
-	expect_stderr_contains "seal-conflict" "seal test conflict carries the reason token"
+	expect_stdout_contains "seal-conflict" "seal test conflict carries the reason token"
 
 	gk "$BETA" seal test file3.txt
 	expect_rc 0 "seal test passes for a file beta already claims"
@@ -224,6 +224,17 @@ expect_stderr_contains() {
 	else
 		dump_last
 		fail "$desc: stderr does not contain \"$needle\""
+	fi
+}
+
+expect_stdout_contains() {
+	needle="$1"
+	desc="$2"
+	if grep -q "$needle" "$GK_OUT_FILE"; then
+		pass "$desc (stdout contains \"$needle\")"
+	else
+		dump_last
+		fail "$desc: stdout does not contain \"$needle\""
 	fi
 }
 

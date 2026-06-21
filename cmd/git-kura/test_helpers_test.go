@@ -71,7 +71,7 @@ func (c *testCLI) openWorktree(t *testing.T, repo, key string) string {
 	t.Helper()
 	res := c.gitKura(repo, "open", key)
 	requireExitCode(t, res, 0)
-	return strings.TrimSpace(res.stdout)
+	return extractOpenedPath(res.stdout)
 }
 
 // openManagedWorktree creates a managed worktree for key in repo using the
@@ -86,9 +86,23 @@ func openManagedWorktree(t *testing.T, repo, key string) string {
 		if err != nil {
 			t.Fatalf("cmdOpen %q: %v", key, err)
 		}
-		path = strings.TrimSpace(out)
+		path = extractOpenedPath(out)
 	})
 	return path
+}
+
+// extractOpenedPath parses the worktree path from the human output of
+// git kura open: "opened: /path (branch: key)\n  created worktree\n..."
+func extractOpenedPath(stdout string) string {
+	line := strings.SplitN(strings.TrimSpace(stdout), "\n", 2)[0]
+	if strings.HasPrefix(line, "opened: ") {
+		after := strings.TrimPrefix(line, "opened: ")
+		if idx := strings.LastIndex(after, " (branch:"); idx >= 0 {
+			return after[:idx]
+		}
+		return strings.TrimSpace(after)
+	}
+	return strings.TrimSpace(stdout)
 }
 
 func (c *testCLI) posixShell(dir, script string) cliResult {
@@ -300,6 +314,13 @@ func requireStderrContains(t *testing.T, result cliResult, want string) {
 	t.Helper()
 	if !strings.Contains(strings.ToLower(result.stderr), strings.ToLower(want)) {
 		t.Fatalf("stderr = %q, want it to contain %q", result.stderr, want)
+	}
+}
+
+func requireStdoutContains(t *testing.T, result cliResult, want string) {
+	t.Helper()
+	if !strings.Contains(strings.ToLower(result.stdout), strings.ToLower(want)) {
+		t.Fatalf("stdout = %q, want it to contain %q", result.stdout, want)
 	}
 }
 
