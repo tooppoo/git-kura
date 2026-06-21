@@ -69,7 +69,7 @@ if [ -z "$VERSION" ]; then
     release_api="https://api.github.com/repos/${REPO}/releases/latest"
     VERSION="$(curl -fsSL "$release_api" | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
     if [ -z "$VERSION" ]; then
-        printf 'Failed to resolve latest release version\n' >&2
+        printf 'Failed to resolve latest release version from GitHub API. Specify --version vX.Y.Z to avoid depending on latest release resolution.\n' >&2
         exit 1
     fi
 fi
