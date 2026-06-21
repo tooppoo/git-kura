@@ -774,16 +774,18 @@ func TestCmdSealDoctorReturnsExitCode7ForIntegrityFailures(t *testing.T) {
 	})
 
 	withWorkingDir(t, repo, func() {
-		err := cmdSealDoctor(sealDoctorOptions{})
+		out, err := captureStdout(t, func() error {
+			return cmdSealDoctor(sealDoctorOptions{})
+		})
 		if err == nil {
 			t.Fatal("cmdSealDoctor invalid store error = nil, want error")
 		}
-		var xe *exitError
-		if !errors.As(err, &xe) || xe.code != exitSealDoctorError {
-			t.Fatalf("cmdSealDoctor exit code = %v, want %d (err: %v)", xe, exitSealDoctorError, err)
+		var re *renderedError
+		if !errors.As(err, &re) || re.code != exitSealDoctorError {
+			t.Fatalf("cmdSealDoctor exit code = %v, want %d (err: %v)", re, exitSealDoctorError, err)
 		}
-		if !strings.Contains(err.Error(), "seal-doctor-error:") {
-			t.Fatalf("doctor error should include stable token: %v", err)
+		if !strings.Contains(out, "seal-doctor-error:") {
+			t.Fatalf("doctor output should include stable token: %s", out)
 		}
 	})
 }
@@ -1725,17 +1727,19 @@ func TestCmdSealTestRejectsDifferentKeyInProcess(t *testing.T) {
 	})
 
 	withWorkingDir(t, wt2, func() {
-		err := cmdSealTest(sealTestOptions{}, []string{"tracked.txt"})
+		out, err := captureStdout(t, func() error {
+			return cmdSealTest(sealTestOptions{}, []string{"tracked.txt"})
+		})
 		if err == nil {
 			t.Fatal("expected conflict error for path claimed by different key, got nil")
 		}
-		var xe *exitError
-		if !errors.As(err, &xe) || xe.code != exitSealConflict {
-			t.Fatalf("expected exitError code %d, got: %v", exitSealConflict, err)
+		var re *renderedError
+		if !errors.As(err, &re) || re.code != exitSealConflict {
+			t.Fatalf("expected renderedError code %d, got: %v", exitSealConflict, err)
 		}
 		for _, want := range []string{"seal-conflict:", "tracked.txt", "key1"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Fatalf("conflict error missing %q: %s", want, err.Error())
+			if !strings.Contains(out, want) {
+				t.Fatalf("conflict stdout missing %q: %s", want, out)
 			}
 		}
 	})
@@ -1764,13 +1768,19 @@ func TestCmdSealTestReportsAllConflictsInProcess(t *testing.T) {
 	// key3 tests all three: third.txt is safe, but the two foreign claims must
 	// both be reported with the keys that hold them.
 	withWorkingDir(t, wt3, func() {
-		err := cmdSealTest(sealTestOptions{}, []string{"tracked.txt", "second.txt", "third.txt"})
+		out, err := captureStdout(t, func() error {
+			return cmdSealTest(sealTestOptions{}, []string{"tracked.txt", "second.txt", "third.txt"})
+		})
 		if err == nil {
 			t.Fatal("expected conflict error, got nil")
 		}
+		var re *renderedError
+		if !errors.As(err, &re) || re.code != exitSealConflict {
+			t.Fatalf("expected renderedError code %d, got: %v", exitSealConflict, err)
+		}
 		for _, want := range []string{"seal-conflict:", "tracked.txt", "key1", "second.txt", "key2"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Fatalf("conflict error missing %q: %s", want, err.Error())
+			if !strings.Contains(out, want) {
+				t.Fatalf("conflict stdout missing %q: %s", want, out)
 			}
 		}
 	})
@@ -2081,18 +2091,22 @@ func TestSealTestDataRenderHumanPrintsConflicts(t *testing.T) {
 	}
 }
 
-func TestSealDoctorDataRenderHumanIsNoop(t *testing.T) {
+func TestSealDoctorDataRenderHumanEmitsFindings(t *testing.T) {
 	data := sealDoctorData{
 		Healthy:  false,
 		Summary:  sealDoctorSummary{CheckedClaims: 1, ErrorCount: 1},
-		Findings: []sealDoctorFinding{{Severity: "error", Code: "invalid-stored-path", Message: "bad"}},
+		Findings: []sealDoctorFinding{{Severity: "error", Code: "invalid-stored-path", Message: "bad path"}},
 	}
 	var sb strings.Builder
 	if err := data.RenderHuman(&sb); err != nil {
 		t.Fatalf("RenderHuman error: %v", err)
 	}
-	if sb.String() != "" {
-		t.Fatalf("sealDoctorData.RenderHuman should be no-op, got: %q", sb.String())
+	got := sb.String()
+	if !strings.Contains(got, "seal-doctor-error:") {
+		t.Fatalf("sealDoctorData.RenderHuman should emit seal-doctor-error: token, got: %q", got)
+	}
+	if !strings.Contains(got, "bad path") {
+		t.Fatalf("sealDoctorData.RenderHuman should emit finding message, got: %q", got)
 	}
 }
 
@@ -2484,9 +2498,13 @@ func TestParseCloseArgsUnknownFlag(t *testing.T) {
 // --- RenderHuman no-op coverage ---
 
 func TestCloseDataJSONRenderHuman(t *testing.T) {
-	d := closeDataJSON{}
-	if err := d.RenderHuman(nil); err != nil {
+	d := closeDataJSON{Key: "k", WorktreePath: "/p", Branch: "k"}
+	var buf strings.Builder
+	if err := d.RenderHuman(&buf); err != nil {
 		t.Fatalf("closeDataJSON.RenderHuman: %v", err)
+	}
+	if !strings.Contains(buf.String(), "/p") {
+		t.Fatalf("RenderHuman output missing worktreePath: %q", buf.String())
 	}
 }
 

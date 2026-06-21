@@ -101,7 +101,7 @@ Flags:
   --dry-run       Show the worktree that would be created, without creating it
   --json          Print the result as a JSON envelope
 
-Without --json, open prints the worktree path on success. A dry run never
+Without --json, open prints the worktree path and what was created. A dry run never
 creates the worktree, branch, or metadata; pre-creation conflicts are reported
 as warnings while the command still succeeds.`
 
@@ -575,11 +575,6 @@ func cmdOpen(key string, opts openOptions) error {
 	}
 	createdMetadata := true
 
-	if !opts.JSON {
-		fmt.Println(path)
-		return nil
-	}
-
 	data := openDataJSON{
 		SchemaVersion:   1,
 		Key:             key,
@@ -594,10 +589,14 @@ func cmdOpen(key string, opts openOptions) error {
 		CreatedBranch:   &createdBranch,
 		CreatedMetadata: &createdMetadata,
 	}
-	if err := validateData(openDataSchema, data); err != nil {
-		return err
+	mode := renderHuman
+	if opts.JSON {
+		if err := validateData(openDataSchema, data); err != nil {
+			return err
+		}
+		mode = renderJSON
 	}
-	return emitResult(renderJSON, Result{Command: commandOpen, Data: data})
+	return emitResult(mode, Result{Command: commandOpen, Data: data})
 }
 
 // cmdOpenDryRun evaluates what open would create for key without any side
@@ -972,13 +971,14 @@ func cmdClose(key string, opts closeOptions) error {
 		partial.RemovedMetadata = true
 	}
 
-	if !opts.JSON {
-		return nil
+	mode := renderHuman
+	if opts.JSON {
+		if err := validateData(closeDataSchema, *partial); err != nil {
+			return err
+		}
+		mode = renderJSON
 	}
-	if err := validateData(closeDataSchema, *partial); err != nil {
-		return err
-	}
-	return emitResult(renderJSON, Result{Command: commandClose, Data: *partial})
+	return emitResult(mode, Result{Command: commandClose, Data: *partial})
 }
 
 // closeFail routes a close failure to the right output. JSON requests render an
@@ -1052,6 +1052,29 @@ type openDataJSON struct {
 }
 
 func (d openDataJSON) RenderHuman(w io.Writer) error {
+	if d.CreatedWorktree != nil || d.CreatedBranch != nil || d.CreatedMetadata != nil {
+		// Actual open: report what was created, consistent with close format.
+		if _, err := fmt.Fprintf(w, "opened: %s (branch: %s)\n", d.WorktreePath, d.Branch); err != nil {
+			return err
+		}
+		if d.CreatedWorktree != nil && *d.CreatedWorktree {
+			if _, err := fmt.Fprintln(w, "  created worktree"); err != nil {
+				return err
+			}
+		}
+		if d.CreatedBranch != nil && *d.CreatedBranch {
+			if _, err := fmt.Fprintln(w, "  created branch"); err != nil {
+				return err
+			}
+		}
+		if d.CreatedMetadata != nil && *d.CreatedMetadata {
+			if _, err := fmt.Fprintln(w, "  created metadata"); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	// Dry-run: show all metadata so the user can review what would be created.
 	_, err := fmt.Fprintf(w,
 		"worktree path:   %s\nbranch:          %s\nrepository root: %s\nbase branch:     %s\n",
 		d.WorktreePath, d.Branch, d.RepositoryRoot, d.BaseBranch)
@@ -1069,7 +1092,32 @@ type closeDataJSON struct {
 	ReleasedSealCount int    `json:"releasedSealCount"`
 }
 
-func (d closeDataJSON) RenderHuman(_ io.Writer) error { return nil }
+func (d closeDataJSON) RenderHuman(w io.Writer) error {
+	if _, err := fmt.Fprintf(w, "closed: %s (branch: %s)\n", d.WorktreePath, d.Branch); err != nil {
+		return err
+	}
+	if d.RemovedWorktree {
+		if _, err := fmt.Fprintln(w, "  removed worktree"); err != nil {
+			return err
+		}
+	}
+	if d.RemovedBranch {
+		if _, err := fmt.Fprintln(w, "  removed branch"); err != nil {
+			return err
+		}
+	}
+	if d.RemovedMetadata {
+		if _, err := fmt.Fprintln(w, "  removed metadata"); err != nil {
+			return err
+		}
+	}
+	if d.ReleasedSealCount > 0 {
+		if _, err := fmt.Fprintf(w, "  released %d seal(s)\n", d.ReleasedSealCount); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // closeErrorDetails carries partial effects from a failed close --json.
 type closeErrorDetails struct {

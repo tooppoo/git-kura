@@ -114,7 +114,18 @@ type sealClaimData struct {
 	Paths      []sealClaimPathItem `json:"paths"`
 }
 
-func (d sealClaimData) RenderHuman(_ io.Writer) error { return nil }
+func (d sealClaimData) RenderHuman(w io.Writer) error {
+	for _, p := range d.Paths {
+		label := p.Status
+		if p.Status == "already-owned" {
+			label = "already owned"
+		}
+		if _, err := fmt.Fprintf(w, "%s: %s\n", label, p.Path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // sealUnclaimPathItem is one path's result in the seal unclaim success data.
 type sealUnclaimPathItem struct {
@@ -128,7 +139,18 @@ type sealUnclaimData struct {
 	Paths      []sealUnclaimPathItem `json:"paths"`
 }
 
-func (d sealUnclaimData) RenderHuman(_ io.Writer) error { return nil }
+func (d sealUnclaimData) RenderHuman(w io.Writer) error {
+	for _, p := range d.Paths {
+		label := p.Status
+		if p.Status == "not-claimed" {
+			label = "not claimed"
+		}
+		if _, err := fmt.Fprintf(w, "%s: %s\n", label, p.Path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // sealMutationPathItem is one path item in seal mutation error details.
 // Status values for claim errors: "would-claim", "already-owned", "owned-by-other",
@@ -212,10 +234,11 @@ type sealTestData struct {
 }
 
 func (d sealTestData) RenderHuman(w io.Writer) error {
-	// Human mode: print conflicts so the user can see which paths are blocked.
+	// Human mode: emit one line per conflict so the user can see every blocked path.
+	// Uses the canonical "seal-conflict:" token, consistent with claim/unclaim errors.
 	for _, r := range d.Results {
 		if r.Status == "claimed-by-other-key" {
-			if _, err := fmt.Fprintf(w, "conflict: %q is claimed by %q\n", r.Path, *r.ClaimedBy); err != nil {
+			if _, err := fmt.Fprintf(w, "seal-conflict: path %q is already claimed by key %q\n", r.Path, *r.ClaimedBy); err != nil {
 				return err
 			}
 		}
@@ -245,9 +268,13 @@ type sealDoctorData struct {
 	Findings []sealDoctorFinding `json:"findings"`
 }
 
-func (d sealDoctorData) RenderHuman(_ io.Writer) error {
-	// Human mode: print nothing on success; violations are reported as a
-	// CommandError by the caller so the renderer writes the message to stderr.
+func (d sealDoctorData) RenderHuman(w io.Writer) error {
+	// Healthy: no output. Unhealthy: one line per finding with the stable token.
+	for _, f := range d.Findings {
+		if _, err := fmt.Fprintf(w, "seal-doctor-error: %s\n", f.Message); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -720,14 +747,13 @@ func cmdSealDoctor(opts sealDoctorOptions) error {
 		return nil
 	}
 
-	// Human mode: print nothing on success; report findings as an error on failure.
+	// Human mode: route through the framework so JSON and human render the same data.
+	// Unhealthy findings go to stdout as a business result (ok:true, healthy:false).
+	if err := emitResult(renderHuman, Result{Command: commandSealDoctor, Data: data}); err != nil {
+		return err
+	}
 	if !data.Healthy {
-		msgs := make([]string, len(inspection.findings))
-		for i, f := range inspection.findings {
-			msgs[i] = f.Message
-		}
-		return exitCodeError(exitSealDoctorError,
-			fmt.Errorf("seal-doctor-error: %s", strings.Join(msgs, "; ")))
+		return &renderedError{code: exitSealDoctorError}
 	}
 	return nil
 }

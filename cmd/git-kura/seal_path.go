@@ -601,19 +601,20 @@ func cmdSealClaim(opts sealClaimOptions, rawPaths []string) error {
 		return sealClaimStoreFail(opts, "write-store", storeFile, err)
 	}
 
-	if !opts.JSON {
-		return nil
-	}
-
 	pathItems := make([]sealClaimPathItem, len(results))
 	for i, r := range results {
 		pathItems[i] = sealClaimPathItem{Path: r.storeKey, Status: r.claimStatus}
 	}
 	data := sealClaimData{CurrentKey: key, Paths: pathItems}
-	if err := validateData(sealClaimDataSchema, data); err != nil {
-		return err
+
+	mode := renderHuman
+	if opts.JSON {
+		if err := validateData(sealClaimDataSchema, data); err != nil {
+			return err
+		}
+		mode = renderJSON
 	}
-	return emitResult(renderJSON, Result{Command: commandSealClaim, Data: data})
+	return emitResult(mode, Result{Command: commandSealClaim, Data: data})
 }
 
 // sealClaimFail routes a seal claim preflight failure to the right output.
@@ -824,19 +825,20 @@ func cmdSealUnclaim(opts sealUnclaimOptions, rawPaths []string) error {
 		return sealUnclaimStoreFail(opts, "write-store", storeFile, err)
 	}
 
-	if !opts.JSON {
-		return nil
-	}
-
 	pathItems := make([]sealUnclaimPathItem, len(results))
 	for i, r := range results {
 		pathItems[i] = sealUnclaimPathItem{Path: r.storeKey, Status: r.unclaimStatus}
 	}
 	data := sealUnclaimData{CurrentKey: key, Paths: pathItems}
-	if err := validateData(sealUnclaimDataSchema, data); err != nil {
-		return err
+
+	mode := renderHuman
+	if opts.JSON {
+		if err := validateData(sealUnclaimDataSchema, data); err != nil {
+			return err
+		}
+		mode = renderJSON
 	}
-	return emitResult(renderJSON, Result{Command: commandSealUnclaim, Data: data})
+	return emitResult(mode, Result{Command: commandSealUnclaim, Data: data})
 }
 
 // sealUnclaimFail routes a seal unclaim preflight failure to the right output.
@@ -966,15 +968,14 @@ func cmdSealTest(opts sealTestOptions, rawPaths []string) error {
 		return nil
 	}
 
-	// Human mode: conflict → existing exit-6 error path.
+	// Human mode: route through the framework so the structured result feeds
+	// both JSON and human renderers from the same data. Conflicts go to stdout
+	// as a business result (ok:true, passed:false), not to stderr as an error.
+	if err := emitResult(renderHuman, Result{Command: commandSealTest, Data: data}); err != nil {
+		return err
+	}
 	if !passed {
-		var conflicts []sealConflict
-		for _, r := range results {
-			if r.Status == "claimed-by-other-key" {
-				conflicts = append(conflicts, sealConflict{path: r.Path, sealedBy: *r.ClaimedBy})
-			}
-		}
-		return sealConflictError(conflicts)
+		return &renderedError{code: exitSealConflict}
 	}
 	return nil
 }
