@@ -43,7 +43,7 @@ build:
 
 .PHONY: walkthrough
 walkthrough: build
-	PATH="$(CURDIR)/bin:$$PATH" sh scripts/walkthrough.sh
+	PATH="$(CURDIR)/bin:$$PATH" sh scripts/test/test-walkthrough.sh
 
 .PHONY: license-check
 license-check:

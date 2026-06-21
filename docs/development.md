@@ -26,7 +26,7 @@ make check
 
 ## Walkthrough test
 
-The walkthrough test is a POSIX `sh` script at [`scripts/walkthrough.sh`](../scripts/walkthrough.sh) that drives the real `git kura` command through representative end-to-end scenarios against a throwaway git repository created in a temporary directory.
+The walkthrough test is a POSIX `sh` script at [`scripts/test/test-walkthrough.sh`](../scripts/test/test-walkthrough.sh) that drives the real `git kura` command through representative end-to-end scenarios against a throwaway git repository created in a temporary directory.
 It favours coverage of the common path over exhaustive variation, and it is independent of the Go unit and integration tests.
 In CI it runs as a separate `walkthrough` job after `make build`.
 
@@ -43,7 +43,7 @@ make walkthrough
 To run the script directly, make sure `git kura` resolves to the build you want to test, then:
 
 ```sh
-PATH="$PWD/bin:$PATH" sh scripts/walkthrough.sh
+PATH="$PWD/bin:$PATH" sh scripts/test/test-walkthrough.sh
 ```
 
 The script creates and cleans up its own temporary git repository on exit, whether it passes or fails, and never modifies your development repository or user environment.
