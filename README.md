@@ -5,76 +5,174 @@
 [![codecov](https://codecov.io/gh/tooppoo/git-kura/graph/badge.svg?token=5f8XJ77qiN)](https://codecov.io/gh/tooppoo/git-kura)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-`git-kura` is a keyed worktree resolver for Git.
+`git-kura` is a conflict-aware keyed worktree coordinator for Git.
 
-It maps issue, ticket, task or feature keys to deterministic Git worktrees for humans, AI coding agents, and reviewers.
+It helps humans, AI coding agents, and reviewers run multiple task-specific worktrees in parallel while detecting and preventing conflicting edits early.
 
-![A screenshot showing when `git-kura` detects a conflict and the agent stops running](./docs/assets/image.png)
-
-## Walkthrough
-
-```sh
-git kura open fizz-feature             # create a worktree and a branch in a repository
-cd $(git kura get fizz-feature)        # move to the worktree
-
-# edit, save and commit in the worktree
-
-cd $(git kura get fizz-feature --root) # move to the repository root
-
-git merge fizz-feature                 # merge changes to main stream
-
-git kura close fizz-feature            # clean up worktree and branch
-```
-
-See [docs/commands.md](docs/commands.md) for the full command reference.
-
-## Quick Start
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/tooppoo/git-kura/main/install.sh | sh
-```
-
-Installs `git-kura` into `~/.local/bin`. See [docs/installation.md](docs/installation.md) for version pinning, custom install directories, checksum verification, and other installation methods.
-
-## Why Kura?
-
-When using Git worktrees with multiple AI coding agents, it is easy to lose track of which worktree belongs to which task.
-
-For example, one agent may implement a change in a task-specific worktree while another tool or reviewer needs to inspect that exact worktree later. If the review target is selected manually, the workflow becomes fragile.
-
-Kura solves this by making the task key the source of truth.
+Instead of relying on each agent to remember where it is working, Kura makes a stable task key the source of truth:
 
 ```txt
 task key
   -> branch name
   -> worktree path
+  -> path claims
 ```
 
-The same key should always resolve to the same workspace.
+![A screenshot showing when `git-kura` detects a conflict and the agent stops running](./docs/assets/image.png)
 
-## Concept
+## Why Kura?
 
-Kura（`蔵`） is built around four ideas:
+Multi-agent development becomes fragile when several agents work against the same repository at the same time.
 
-* **Keyed workspaces**: any stable key — an issue number, ticket ID, task name, feature slug, or review target — can identify one workspace.
+Typical failure modes are:
+
+* an agent edits the wrong worktree because the path was selected manually;
+* a reviewer inspects a different checkout from the one used by the implementer;
+* two agents independently modify the same files and only discover the conflict at merge time;
+* a local hook, skill file, or tool setup drifts across worktrees and agents.
+
+Kura addresses these failure modes with two small primitives:
+
+* **keyed worktrees**: one stable key resolves to one deterministic branch and worktree;
+* **path seals**: a task claims the repository-relative paths it intends to edit, so other tasks can detect the overlap before editing, committing, or merging.
+
+Kura does not try to manage the AI session itself. It gives agents, scripts, and humans a shared local coordination layer that is explicit, inspectable, and Git-native.
+
+## Quick Start
+
+Install the latest release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tooppoo/git-kura/main/install.sh | sh
+```
+
+This installs `git-kura` into `~/.local/bin`. See [docs/installation.md](docs/installation.md) for version pinning, custom install directories, checksum verification, and other installation methods.
+
+Create a task worktree:
+
+```sh
+git kura open issue-54
+cd "$(git kura get issue-54)"
+```
+
+Claim the files this task intends to edit:
+
+```sh
+git kura seal claim README.md docs/commands.md
+```
+
+Check whether another task has already claimed a path:
+
+```sh
+git kura seal test README.md
+```
+
+Install repository-local safety helpers from the matching release asset:
+
+```sh
+git kura tools install pre-commit claude-skill codex-skill
+```
+
+The `pre-commit` component rejects commits whose staged files conflict with another task's path seals. The `claude-skill` and `codex-skill` components install agent instructions into the repository so agents can use Kura consistently.
+
+## Parallel worktree workflow
+
+A typical multi-agent workflow is:
+
+```sh
+# Agent A
+git kura open issue-54
+cd "$(git kura get issue-54)"
+git kura seal claim README.md
+# edit, test, commit
+
+# Agent B
+git kura open issue-55
+cd "$(git kura get issue-55)"
+git kura seal test README.md   # fails before Agent B edits a path claimed by issue-54
+```
+
+When the task is ready, resolve the key back to the correct branch and worktree:
+
+```sh
+cd "$(git kura get issue-54 --root)"
+git merge "$(git kura get issue-54 --branch)"
+git kura close issue-54
+```
+
+`git kura close <key>` removes the managed worktree and branch and releases every path seal held by that key.
+
+## Core commands
+
+```sh
+git kura open <key>             # create a worktree and branch for a task key
+git kura open <key> --dry-run   # inspect planned branch/path without side effects
+git kura get <key>              # print the worktree path
+git kura get <key> --branch     # print the branch name
+git kura get <key> --root       # print the repository root
+git kura get <key> --json       # print structured JSON
+git kura get <key> --toon       # print TOON for AI prompts
+git kura ls                     # list open Kura worktree keys
+git kura close <key>            # remove a managed worktree and release its seals
+```
+
+See [docs/commands.md](docs/commands.md) for the full command reference.
+
+## Path seals
+
+Path seals are repository-wide claims stored in the Git common dir and shared by all worktrees of the same repository.
+
+```sh
+git kura seal claim <path...>    # claim paths for the current worktree key
+git kura seal unclaim <path...>  # release paths claimed by the current worktree key
+git kura seal test <path...>     # read-only conflict check for the current worktree key
+git kura seal ls [key]           # inspect claimed paths
+git kura seal doctor             # validate the seal store
+```
+
+`seal claim`, `seal unclaim`, and `seal test` derive the current key from the Kura-managed worktree they run in. They do not rely on process-local state or an environment variable, which makes them suitable for fresh shell invocations used by coding agents.
+
+A path is safe when it is unclaimed or already claimed by the current key. A path claimed by another key is a conflict.
+
+## Tool components
+
+Kura can install repository-local helper components:
+
+```sh
+git kura tools status
+git kura tools install pre-commit
+git kura tools install claude-skill
+git kura tools install codex-skill
+git kura tools install --all
+git kura tools uninstall <component...>
+```
+
+Available component IDs are:
+
+* `pre-commit`: installs a repository-local hook that runs path-seal checks against staged files;
+* `claude-skill`: installs `.claude/skills/git-kura/SKILL.md`;
+* `codex-skill`: installs `.agents/skills/git-kura/SKILL.md`.
+
+Tool components are installed from the tools release archive that matches the running binary's release version. The archive checksum is verified before extraction. Existing user-modified or unmanaged files are not overwritten.
+
+## Design principles
+
+Kura（`蔵`） is built around these ideas:
+
+* **The key is the source of truth**: humans and agents should not need to remember worktree paths manually.
 * **Worktree isolation**: each key gets its own Git worktree and branch.
-* **A small local kura**: Kura（`蔵`） keeps keyed worktrees and metadata in a repository-local store, so the right workspace can be put away, found, and cleaned up without relying on memory.
-* **Deterministic resolution**: humans, scripts, AI coding agents, and reviewers can resolve the same key to the same workspace without guessing.
+* **Early conflict detection**: path seals make intended edits visible before implementation, commit, or merge.
+* **Script- and agent-friendly output**: commands support plain output for shell scripts, JSON for structured tools, and TOON for AI prompts.
+* **Repository-local state**: Kura stores worktree metadata, path seals, and tool metadata in repository-local Git state.
+* **Safety over convenience**: destructive operations are conservative and should stop rather than silently discard or overwrite user work.
 
-Kura is intentionally small. It is not a Git client, an AI agent manager, a pull request tool, an issue tracker client, or a project management tool. Its job is to provide a stable mapping between a key and a local Git worktree.
-
-## Usage
-
-See [docs/commands.md](docs/commands.md) for the command reference and [docs/output-format.md](docs/output-format.md) for structured output formats.
-
-## Installation
-
-See [docs/installation.md](docs/installation.md) for options such as `--version`, `--install-dir`, and `--require-signature`.
+Kura is intentionally small. It is not a Git client, an AI session manager, a pull request tool, an issue tracker client, or a project management tool.
 
 ## Documentation
 
 * [Installation](docs/installation.md)
 * [Commands](docs/commands.md)
+* [Seal commands: context and scope](docs/commands/seal-commands.md)
 * [Output formats](docs/output-format.md)
 * [State management](docs/state-management.md)
 * [Design](docs/design.md)
