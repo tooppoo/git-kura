@@ -141,7 +141,7 @@ A consumer would then have to handle both a missing field and an empty array.
 
 ## Output Contract
 
-- The envelope shape and its `ok`-driven `data` / `error` exclusivity are a stable contract validated by `cmd/git-kura/schema/envelope.schema.json`.
+- The envelope shape and its `ok`-driven `data` / `error` exclusivity are a stable contract validated by `internal/output/schema/envelope.schema.json`.
 - `schemaVersion` versions the envelope shape; command-specific payload schemas version independently.
 - `error.code` and `warnings[].code` are hyphen-case tokens; `error.code` matches the existing stderr reason tokens and exit-code names.
 - Scalar output is not part of this contract and remains a single bare value.

@@ -8,7 +8,7 @@
 [20260617T070134Z_output-framework-envelope-result-renderer.md](20260617T070134Z_output-framework-envelope-result-renderer.md) established the output framework — envelope, `Result`, `CommandError`, `Warning`, `Renderer`, and the envelope JSON Schema — inside `package main` in `cmd/git-kura/output.go`.
 
 As the framework grew to serve `--json`, `--toon`, and human rendering across every command, keeping it in `package main` created two problems.
-First, it could not be unit-tested in isolation: Go measures coverage per package, so tests in `package main` that call framework functions do not contribute to `package main`'s own coverage figures in the same way a dedicated package would, and the framework could not be imported from a hypothetical future second binary.
+First, it could not be unit-tested and measured in isolation: tests in `package main` blended framework coverage into the CLI package's coverage signal, and the framework could not be imported from a hypothetical future second binary.
 Second, it mixed a stable, machine-readable output contract with CLI flag wiring, making it hard to see the boundary between "what the output format guarantees" and "how the CLI binds flags to the output mode."
 
 This ADR records the decision made in issue #82: extract the output framework to `internal/output`.
@@ -44,7 +44,7 @@ Command-specific `data` and `error.details` schemas (e.g., `get_data.schema.json
 
 ### Coverage requirement
 
-`internal/output` must have its own test file (`internal/output/output_test.go`) so that the package meets the project's 90% coverage threshold independently of the `cmd/git-kura` test suite.
+`internal/output` must have its own focused test file (`internal/output/output_test.go`) so that the package's framework behavior is covered without relying on the `cmd/git-kura` test suite. The project's 90% coverage threshold remains enforced on total repository coverage by `make coverage`.
 
 ## Alternatives Considered
 
