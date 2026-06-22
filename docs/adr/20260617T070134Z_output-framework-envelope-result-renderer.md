@@ -32,7 +32,7 @@ Structured (`--json`) output must use a single common envelope with these fields
 - When `ok` is `true`, `data` must be present and `error` must be absent.
 - When `ok` is `false`, `error` must be present and `data` must be absent.
 
-The envelope is validated against `cmd/git-kura/schema/envelope.schema.json`.
+The envelope is validated against `cmd/git-kura/schema/envelope.schema.json` (later moved to `internal/output/schema/envelope.schema.json` by [20260622T150313Z_output-framework-extract-to-internal-package.md](20260622T150313Z_output-framework-extract-to-internal-package.md)).
 The schema enforces the field set, the `ok`-driven exclusivity of `data` and `error`, `warnings` always being an array, `schemaVersion` being the current version, and `command` being one of the canonical identifiers.
 Command-specific `data` and `error.details` schemas are layered on top of this envelope in follow-up issues; the envelope schema constrains `data` and `error.details` only as objects.
 

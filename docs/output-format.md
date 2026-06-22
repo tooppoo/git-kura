@@ -326,4 +326,4 @@ For `--dry-run` without `--json`, the format shows `worktree path`, `branch`, `r
 
 ## Metadata schema
 
-The common envelope is defined in [`cmd/git-kura/schema/envelope.schema.json`](../cmd/git-kura/schema/envelope.schema.json). The command-specific `data` payloads are defined in [`cmd/git-kura/schema/get_data.schema.json`](../cmd/git-kura/schema/get_data.schema.json) and [`cmd/git-kura/schema/open_dry_run_data.schema.json`](../cmd/git-kura/schema/open_dry_run_data.schema.json). All schemas are embedded in the binary for runtime output validation.
+The common envelope is defined in [`internal/output/schema/envelope.schema.json`](../internal/output/schema/envelope.schema.json). The command-specific `data` payloads are defined in [`cmd/git-kura/schema/get_data.schema.json`](../cmd/git-kura/schema/get_data.schema.json) and [`cmd/git-kura/schema/open_dry_run_data.schema.json`](../cmd/git-kura/schema/open_dry_run_data.schema.json). All schemas are embedded in the binary for runtime output validation.
