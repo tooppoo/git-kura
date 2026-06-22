@@ -13,6 +13,7 @@ import (
 	"time"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/tooppoo/git-kura/internal/output"
 )
 
 // Unit tests cover pure parsing and validation helpers without creating Git
@@ -396,17 +397,17 @@ func TestReasonForExitCode(t *testing.T) {
 
 func TestToCommandError(t *testing.T) {
 	t.Run("plain error is a general error", func(t *testing.T) {
-		ce := toCommandError(commandGet, fmt.Errorf("boom"))
+		ce := toCommandError(output.CommandGet, fmt.Errorf("boom"))
 		if ce.Code != "general-error" || ce.ExitCode != exitGeneralError {
 			t.Fatalf("toCommandError plain = %+v, want general-error/%d", ce, exitGeneralError)
 		}
-		if ce.Message != "boom" || ce.Command != commandGet {
+		if ce.Message != "boom" || ce.Command != output.CommandGet {
 			t.Fatalf("toCommandError plain = %+v, want message boom, command get", ce)
 		}
 	})
 
 	t.Run("exitError keeps its code and reason", func(t *testing.T) {
-		ce := toCommandError(commandOpen, exitCodeError(exitNotFound, fmt.Errorf("missing")))
+		ce := toCommandError(output.CommandOpen, exitCodeError(exitNotFound, fmt.Errorf("missing")))
 		if ce.Code != "not-found" || ce.ExitCode != exitNotFound {
 			t.Fatalf("toCommandError exitError = %+v, want not-found/%d", ce, exitNotFound)
 		}
@@ -427,8 +428,8 @@ func TestTOONRendererFormat(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	r := selectRenderer(renderTOON)
-	if err := r.RenderResult(&buf, &bytes.Buffer{}, Result{Command: commandGet, Data: data}); err != nil {
+	r := output.SelectRenderer(output.RenderTOON)
+	if err := r.RenderResult(&buf, &bytes.Buffer{}, output.Result{Command: output.CommandGet, Data: data}); err != nil {
 		t.Fatalf("RenderResult error = %v", err)
 	}
 	out := buf.String()
@@ -460,8 +461,8 @@ func TestTOONRendererFields(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	r := selectRenderer(renderTOON)
-	if err := r.RenderResult(&buf, &bytes.Buffer{}, Result{Command: commandGet, Data: data}); err != nil {
+	r := output.SelectRenderer(output.RenderTOON)
+	if err := r.RenderResult(&buf, &bytes.Buffer{}, output.Result{Command: output.CommandGet, Data: data}); err != nil {
 		t.Fatalf("RenderResult error = %v", err)
 	}
 	out := buf.String()
@@ -2992,19 +2993,21 @@ func TestEncodeEnvelopeSchemaValidationFailure(t *testing.T) {
 	// {"ok":false,"command":"","schemaVersion":0,"warnings":null} which fails the
 	// envelope schema (command must be one of the allowed enum values, warnings must
 	// be an array not null).
-	_, err := encodeEnvelope(Envelope{})
+	_, err := output.EncodeEnvelope(output.Envelope{})
 	if err == nil {
 		t.Fatal("expected schema validation error for empty Envelope, got nil")
 	}
 }
 
-// TestWriteTOONEnvelopeSchemaError verifies that writeTOONEnvelope surfaces the
-// encodeEnvelope error rather than silently swallowing it.
+// TestWriteTOONEnvelopeSchemaError verifies that the TOON renderer surfaces
+// EncodeEnvelope errors rather than silently swallowing them. It uses
+// WriteEnvelope (which shares the same encode+validate path) since the TOON
+// renderer's internal helper is not exported.
 func TestWriteTOONEnvelopeSchemaError(t *testing.T) {
 	var buf bytes.Buffer
-	err := writeTOONEnvelope(&buf, Envelope{})
+	err := output.WriteEnvelope(&buf, output.Envelope{})
 	if err == nil {
-		t.Fatal("writeTOONEnvelope with invalid envelope: expected error, got nil")
+		t.Fatal("WriteEnvelope with invalid envelope: expected error, got nil")
 	}
 }
 
@@ -3012,7 +3015,7 @@ func TestWriteTOONEnvelopeSchemaError(t *testing.T) {
 // returns renderTOON when Toon is set, renderJSON when only JSON is set, and
 // renderHuman when neither is set. These are pure-function tests; no git repo needed.
 func TestRenderModeTOON(t *testing.T) {
-	requireMode := func(t *testing.T, got, want renderMode, label string) {
+	requireMode := func(t *testing.T, got, want output.RenderMode, label string) {
 		t.Helper()
 		if got != want {
 			t.Fatalf("%s: got %v, want %v", label, got, want)
@@ -3021,58 +3024,58 @@ func TestRenderModeTOON(t *testing.T) {
 
 	t.Run("openOptions", func(t *testing.T) {
 		toon, json, human := openOptions{Toon: true}, openOptions{JSON: true}, openOptions{}
-		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
-		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
-		requireMode(t, human.renderMode(), renderHuman, "default")
+		requireMode(t, toon.renderMode(), output.RenderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), output.RenderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), output.RenderHuman, "default")
 	})
 
 	t.Run("closeOptions", func(t *testing.T) {
 		toon, json, human := closeOptions{Toon: true}, closeOptions{JSON: true}, closeOptions{}
-		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
-		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
-		requireMode(t, human.renderMode(), renderHuman, "default")
+		requireMode(t, toon.renderMode(), output.RenderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), output.RenderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), output.RenderHuman, "default")
 	})
 
 	t.Run("lsOptions", func(t *testing.T) {
 		toon, json, human := lsOptions{Toon: true}, lsOptions{JSON: true}, lsOptions{}
-		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
-		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
-		requireMode(t, human.renderMode(), renderHuman, "default")
+		requireMode(t, toon.renderMode(), output.RenderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), output.RenderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), output.RenderHuman, "default")
 	})
 
 	t.Run("sealLsOptions", func(t *testing.T) {
 		toon, json, human := sealLsOptions{Toon: true}, sealLsOptions{JSON: true}, sealLsOptions{}
-		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
-		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
-		requireMode(t, human.renderMode(), renderHuman, "default")
+		requireMode(t, toon.renderMode(), output.RenderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), output.RenderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), output.RenderHuman, "default")
 	})
 
 	t.Run("sealTestOptions", func(t *testing.T) {
 		toon, json, human := sealTestOptions{Toon: true}, sealTestOptions{JSON: true}, sealTestOptions{}
-		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
-		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
-		requireMode(t, human.renderMode(), renderHuman, "default")
+		requireMode(t, toon.renderMode(), output.RenderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), output.RenderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), output.RenderHuman, "default")
 	})
 
 	t.Run("sealDoctorOptions", func(t *testing.T) {
 		toon, json, human := sealDoctorOptions{Toon: true}, sealDoctorOptions{JSON: true}, sealDoctorOptions{}
-		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
-		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
-		requireMode(t, human.renderMode(), renderHuman, "default")
+		requireMode(t, toon.renderMode(), output.RenderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), output.RenderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), output.RenderHuman, "default")
 	})
 
 	t.Run("sealClaimOptions", func(t *testing.T) {
 		toon, json, human := sealClaimOptions{Toon: true}, sealClaimOptions{JSON: true}, sealClaimOptions{}
-		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
-		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
-		requireMode(t, human.renderMode(), renderHuman, "default")
+		requireMode(t, toon.renderMode(), output.RenderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), output.RenderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), output.RenderHuman, "default")
 	})
 
 	t.Run("sealUnclaimOptions", func(t *testing.T) {
 		toon, json, human := sealUnclaimOptions{Toon: true}, sealUnclaimOptions{JSON: true}, sealUnclaimOptions{}
-		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
-		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
-		requireMode(t, human.renderMode(), renderHuman, "default")
+		requireMode(t, toon.renderMode(), output.RenderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), output.RenderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), output.RenderHuman, "default")
 	})
 }
 

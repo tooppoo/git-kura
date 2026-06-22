@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/tooppoo/git-kura/internal/output"
 )
 
 func requireConformsToEnvelopeSchema(t *testing.T, jsonOutput string) {
@@ -15,7 +16,7 @@ func requireConformsToEnvelopeSchema(t *testing.T, jsonOutput string) {
 	if err != nil {
 		t.Fatalf("parse json output: %v\noutput: %s", err, jsonOutput)
 	}
-	if err := envelopeSchema.Validate(inst); err != nil {
+	if err := output.Schema.Validate(inst); err != nil {
 		t.Fatalf("json output does not conform to envelope schema:\n%v\noutput: %s", err, jsonOutput)
 	}
 }
@@ -26,7 +27,7 @@ func requireViolatesEnvelopeSchema(t *testing.T, jsonOutput string) {
 	if err != nil {
 		return
 	}
-	if err := envelopeSchema.Validate(inst); err == nil {
+	if err := output.Schema.Validate(inst); err == nil {
 		t.Fatalf("json output unexpectedly conforms to envelope schema:\n%s", jsonOutput)
 	}
 }
@@ -91,12 +92,12 @@ func TestSchemaCommandEnumMatchesAllCommands(t *testing.T) {
 			} `json:"command"`
 		} `json:"properties"`
 	}
-	if err := json.Unmarshal(envelopeSchemaJSON, &schemaDoc); err != nil {
+	if err := json.Unmarshal(output.SchemaJSON, &schemaDoc); err != nil {
 		t.Fatalf("parse envelope schema: %v", err)
 	}
 
-	want := make([]string, len(allCommands))
-	for i, c := range allCommands {
+	want := make([]string, len(output.AllCommands))
+	for i, c := range output.AllCommands {
 		want[i] = string(c)
 	}
 	got := append([]string(nil), schemaDoc.Properties.Command.Enum...)
@@ -104,32 +105,32 @@ func TestSchemaCommandEnumMatchesAllCommands(t *testing.T) {
 	sort.Strings(want)
 	sort.Strings(got)
 	if strings.Join(want, ",") != strings.Join(got, ",") {
-		t.Fatalf("schema command enum %v does not match allCommands %v", got, want)
+		t.Fatalf("schema command enum %v does not match AllCommands %v", got, want)
 	}
 }
 
 func TestEnvelopeOmitsDataWhenNilEvenThoughSchemaRejectsIt(t *testing.T) {
-	_, err := encodeEnvelope(Envelope{
+	_, err := output.EncodeEnvelope(output.Envelope{
 		OK:            true,
-		Command:       commandGet,
-		SchemaVersion: envelopeSchemaVersion,
-		Warnings:      []Warning{},
+		Command:       output.CommandGet,
+		SchemaVersion: output.SchemaVersion,
+		Warnings:      []output.Warning{},
 	})
 	if err == nil {
-		t.Fatal("encodeEnvelope with nil data on success = nil error, want schema violation")
+		t.Fatal("EncodeEnvelope with nil data on success = nil error, want schema violation")
 	}
 }
 
 func TestWriteEnvelopePropagatesEncodeError(t *testing.T) {
 	var buf strings.Builder
-	err := writeEnvelope(&buf, Envelope{
+	err := output.WriteEnvelope(&buf, output.Envelope{
 		OK:            true,
-		Command:       commandGet,
-		SchemaVersion: envelopeSchemaVersion,
-		Warnings:      []Warning{},
+		Command:       output.CommandGet,
+		SchemaVersion: output.SchemaVersion,
+		Warnings:      []output.Warning{},
 	})
 	if err == nil {
-		t.Fatal("writeEnvelope with invalid envelope = nil, want error")
+		t.Fatal("WriteEnvelope with invalid envelope = nil, want error")
 	}
 	if buf.Len() != 0 {
 		t.Fatalf("buf = %q, want empty on encode failure", buf.String())

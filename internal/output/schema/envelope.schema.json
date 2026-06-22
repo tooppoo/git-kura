@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/cmd/git-kura/schema/envelope.schema.json",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/internal/output/schema/envelope.schema.json",
   "title": "git kura — structured output envelope",
   "description": "Common envelope for the structured (--json) output of git kura commands. Command-specific data and error.details schemas are layered on top of this envelope in follow-up issues.",
   "type": "object",

@@ -16,6 +16,7 @@ import (
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tooppoo/git-kura/internal/gitutil"
+	"github.com/tooppoo/git-kura/internal/output"
 	"github.com/tooppoo/git-kura/internal/worktree"
 )
 
@@ -287,14 +288,14 @@ type openOptions struct {
 	Toon   bool
 }
 
-func (o openOptions) renderMode() renderMode {
+func (o openOptions) renderMode() output.RenderMode {
 	if o.Toon {
-		return renderTOON
+		return output.RenderTOON
 	}
 	if o.JSON {
-		return renderJSON
+		return output.RenderJSON
 	}
-	return renderHuman
+	return output.RenderHuman
 }
 
 type closeOptions struct {
@@ -302,14 +303,14 @@ type closeOptions struct {
 	Toon bool
 }
 
-func (o closeOptions) renderMode() renderMode {
+func (o closeOptions) renderMode() output.RenderMode {
 	if o.Toon {
-		return renderTOON
+		return output.RenderTOON
 	}
 	if o.JSON {
-		return renderJSON
+		return output.RenderJSON
 	}
-	return renderHuman
+	return output.RenderHuman
 }
 
 type lsOptions struct {
@@ -317,14 +318,14 @@ type lsOptions struct {
 	Toon bool
 }
 
-func (o lsOptions) renderMode() renderMode {
+func (o lsOptions) renderMode() output.RenderMode {
 	if o.Toon {
-		return renderTOON
+		return output.RenderTOON
 	}
 	if o.JSON {
-		return renderJSON
+		return output.RenderJSON
 	}
-	return renderHuman
+	return output.RenderHuman
 }
 
 // lsData is the structured success payload for ls --json.
@@ -556,12 +557,12 @@ func cmdGet(key string, opts getOptions) error {
 		if err := validateData(getDataSchema, data); err != nil {
 			return err
 		}
-		return emitResult(renderJSON, Result{Command: commandGet, Data: data})
+		return emitResult(output.RenderJSON, output.Result{Command: output.CommandGet, Data: data})
 	case outputTOON:
 		if err := validateData(getDataSchema, data); err != nil {
 			return err
 		}
-		return emitResult(renderTOON, Result{Command: commandGet, Data: data})
+		return emitResult(output.RenderTOON, output.Result{Command: output.CommandGet, Data: data})
 	}
 
 	return nil
@@ -574,11 +575,11 @@ func getFail(opts getOptions, err error) error {
 	if opts.OutputMode != outputJSON && opts.OutputMode != outputTOON {
 		return err
 	}
-	mode := renderJSON
+	mode := output.RenderJSON
 	if opts.OutputMode == outputTOON {
-		mode = renderTOON
+		mode = output.RenderTOON
 	}
-	return emitError(mode, toCommandError(commandGet, err))
+	return emitError(mode, toCommandError(output.CommandGet, err))
 }
 
 func cmdOpen(key string, opts openOptions) error {
@@ -644,12 +645,12 @@ func cmdOpen(key string, opts openOptions) error {
 		CreatedMetadata: &createdMetadata,
 	}
 	mode := opts.renderMode()
-	if mode != renderHuman {
+	if mode != output.RenderHuman {
 		if err := validateData(openDataSchema, data); err != nil {
 			return err
 		}
 	}
-	return emitResult(mode, Result{Command: commandOpen, Data: data})
+	return emitResult(mode, output.Result{Command: output.CommandOpen, Data: data})
 }
 
 // cmdOpenDryRun evaluates what open would create for key without any side
@@ -681,7 +682,7 @@ func cmdOpenDryRun(opts openOptions, repoRoot, key, path, branch string) error {
 
 	warnings := dryRunConflictWarnings(repoRoot, key, path, branch)
 
-	return emitResult(opts.renderMode(), Result{Command: commandOpen, Data: data, Warnings: warnings})
+	return emitResult(opts.renderMode(), output.Result{Command: output.CommandOpen, Data: data, Warnings: warnings})
 }
 
 // openFail routes an open failure to the right output. JSON/TOON requests
@@ -689,10 +690,10 @@ func cmdOpenDryRun(opts openOptions, repoRoot, key, path, branch string) error {
 // existing plain-error behavior.
 func openFail(opts openOptions, err error) error {
 	mode := opts.renderMode()
-	if mode == renderHuman {
+	if mode == output.RenderHuman {
 		return err
 	}
-	return emitError(mode, toCommandError(commandOpen, err))
+	return emitError(mode, toCommandError(output.CommandOpen, err))
 }
 
 // dryRunConflict is one pre-creation collision found by open --dry-run. Type is
@@ -715,7 +716,7 @@ type dryRunConflictDetails struct {
 // listing every collision found, or nil when there is none. Detection is
 // best-effort: a check that itself errors is treated as "no conflict" so the
 // dry-run never fails on it.
-func dryRunConflictWarnings(repoRoot, key, path, branch string) []Warning {
+func dryRunConflictWarnings(repoRoot, key, path, branch string) []output.Warning {
 	var conflicts []dryRunConflict
 
 	if _, err := os.Stat(path); err == nil {
@@ -738,7 +739,7 @@ func dryRunConflictWarnings(repoRoot, key, path, branch string) []Warning {
 	for i, c := range conflicts {
 		types[i] = c.Type
 	}
-	return []Warning{{
+	return []output.Warning{{
 		Code:    "open-dry-run-conflict",
 		Message: fmt.Sprintf("the planned worktree may conflict with existing state: %s", strings.Join(types, ", ")),
 		Details: dryRunConflictDetails{Conflicts: conflicts},
@@ -747,15 +748,15 @@ func dryRunConflictWarnings(repoRoot, key, path, branch string) []Warning {
 
 // emitResult renders a successful Result through the selected renderer, writing
 // to the process stdout/stderr. Returns nil on success.
-func emitResult(mode renderMode, r Result) error {
-	return selectRenderer(mode).RenderResult(os.Stdout, os.Stderr, r)
+func emitResult(mode output.RenderMode, r output.Result) error {
+	return output.SelectRenderer(mode).RenderResult(os.Stdout, os.Stderr, r)
 }
 
 // emitError renders a CommandError through the selected renderer and returns the
 // exit-code-only sentinel, so main exits with the command's code without
 // printing the failure again.
-func emitError(mode renderMode, cerr *CommandError) error {
-	if err := selectRenderer(mode).RenderError(os.Stdout, os.Stderr, cerr); err != nil {
+func emitError(mode output.RenderMode, cerr *output.CommandError) error {
+	if err := output.SelectRenderer(mode).RenderError(os.Stdout, os.Stderr, cerr); err != nil {
 		return err
 	}
 	return &renderedError{code: cerr.ExitCode}
@@ -765,7 +766,7 @@ func emitError(mode renderMode, cerr *CommandError) error {
 // CommandError, preserving the existing exit-code contract. An *exitError keeps
 // its code and maps to the matching hyphen-case reason token; any other error is
 // a general error (exit code 1).
-func toCommandError(cmd Command, err error) *CommandError {
+func toCommandError(cmd output.Command, err error) *output.CommandError {
 	code := "general-error"
 	exitCode := exitGeneralError
 	var xe *exitError
@@ -773,7 +774,7 @@ func toCommandError(cmd Command, err error) *CommandError {
 		exitCode = xe.code
 		code = reasonForExitCode(xe.code)
 	}
-	return &CommandError{
+	return &output.CommandError{
 		Command:  cmd,
 		Code:     code,
 		Message:  err.Error(),
@@ -881,22 +882,22 @@ func cmdLs(opts lsOptions) error {
 	}
 
 	mode := opts.renderMode()
-	if mode != renderHuman {
+	if mode != output.RenderHuman {
 		if err := validateData(lsDataSchema, data); err != nil {
 			return err
 		}
 	}
-	return emitResult(mode, Result{Command: commandLs, Data: data})
+	return emitResult(mode, output.Result{Command: output.CommandLs, Data: data})
 }
 
 // lsFail routes an ls failure to the right output. JSON/TOON requests render an
 // ok:false envelope on stdout; plain requests keep the existing error behavior.
 func lsFail(opts lsOptions, err error) error {
 	mode := opts.renderMode()
-	if mode == renderHuman {
+	if mode == output.RenderHuman {
 		return err
 	}
-	return emitError(mode, toCommandError(commandLs, err))
+	return emitError(mode, toCommandError(output.CommandLs, err))
 }
 
 // cmdClose tears down the worktree for key and releases every path seal that
@@ -1020,12 +1021,12 @@ func cmdClose(key string, opts closeOptions) error {
 	}
 
 	mode := opts.renderMode()
-	if mode != renderHuman {
+	if mode != output.RenderHuman {
 		if err := validateData(closeDataSchema, *partial); err != nil {
 			return err
 		}
 	}
-	return emitResult(mode, Result{Command: commandClose, Data: *partial})
+	return emitResult(mode, output.Result{Command: output.CommandClose, Data: *partial})
 }
 
 // closeFail routes a close failure to the right output. JSON/TOON requests
@@ -1033,7 +1034,7 @@ func cmdClose(key string, opts closeOptions) error {
 // TOON requests keep the existing plain-error behavior.
 func closeFail(opts closeOptions, partial *closeDataJSON, phase string, err error) error {
 	mode := opts.renderMode()
-	if mode == renderHuman {
+	if mode == output.RenderHuman {
 		return err
 	}
 	var details *closeErrorDetails
@@ -1042,7 +1043,7 @@ func closeFail(opts closeOptions, partial *closeDataJSON, phase string, err erro
 	} else {
 		details = &closeErrorDetails{Phase: phase}
 	}
-	cerr := toCommandError(commandClose, err)
+	cerr := toCommandError(output.CommandClose, err)
 	cerr.Details = details
 	return emitError(mode, cerr)
 }
@@ -1051,7 +1052,7 @@ func closeFail(opts closeOptions, partial *closeDataJSON, phase string, err erro
 // to the right output, including error.details.storeError as required by Issue #63.
 func closeStoreFail(opts closeOptions, partial *closeDataJSON, phase string, storeFile string, err error) error {
 	mode := opts.renderMode()
-	if mode == renderHuman {
+	if mode == output.RenderHuman {
 		return err
 	}
 	statusMap := map[string]string{
@@ -1065,7 +1066,7 @@ func closeStoreFail(opts closeOptions, partial *closeDataJSON, phase string, sto
 	} else {
 		details = &closeErrorDetails{Phase: phase, StoreError: se}
 	}
-	cerr := toCommandError(commandClose, err)
+	cerr := toCommandError(output.CommandClose, err)
 	cerr.Details = details
 	return emitError(mode, cerr)
 }

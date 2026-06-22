@@ -6,15 +6,16 @@ import (
 	"testing"
 
 	toon "github.com/toon-format/toon-go"
+	"github.com/tooppoo/git-kura/internal/output"
 )
 
 // TestTOONRendererRendersSuccessEnvelope verifies that toonRenderer produces
 // TOON output that contains all top-level envelope fields for a success result.
 func TestTOONRendererRendersSuccessEnvelope(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	r := selectRenderer(renderTOON)
-	if err := r.RenderResult(&stdout, &stderr, Result{
-		Command: commandGet,
+	r := output.SelectRenderer(output.RenderTOON)
+	if err := r.RenderResult(&stdout, &stderr, output.Result{
+		Command: output.CommandGet,
 		Data:    sampleData{Value: "hello"},
 	}); err != nil {
 		t.Fatalf("RenderResult: %v", err)
@@ -36,9 +37,9 @@ func TestTOONRendererRendersSuccessEnvelope(t *testing.T) {
 // TOON output containing all top-level fields for an error result.
 func TestTOONRendererRendersErrorEnvelope(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	r := selectRenderer(renderTOON)
-	if err := r.RenderError(&stdout, &stderr, &CommandError{
-		Command:  commandSealClaim,
+	r := output.SelectRenderer(output.RenderTOON)
+	if err := r.RenderError(&stdout, &stderr, &output.CommandError{
+		Command:  output.CommandSealClaim,
 		Code:     "seal-conflict",
 		Message:  "path is already claimed",
 		ExitCode: exitSealConflict,
@@ -61,11 +62,11 @@ func TestTOONRendererRendersErrorEnvelope(t *testing.T) {
 // TestTOONRendererCarriesWarnings verifies that warnings appear in TOON output.
 func TestTOONRendererCarriesWarnings(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	r := selectRenderer(renderTOON)
-	if err := r.RenderResult(&stdout, &stderr, Result{
-		Command:  commandOpen,
+	r := output.SelectRenderer(output.RenderTOON)
+	if err := r.RenderResult(&stdout, &stderr, output.Result{
+		Command:  output.CommandOpen,
 		Data:     sampleData{Value: "x"},
-		Warnings: []Warning{{Code: "stale-metadata", Message: "metadata is stale"}},
+		Warnings: []output.Warning{{Code: "stale-metadata", Message: "metadata is stale"}},
 	}); err != nil {
 		t.Fatalf("RenderResult: %v", err)
 	}
@@ -83,10 +84,10 @@ func TestTOONRendererCarriesWarnings(t *testing.T) {
 // appear in TOON output.
 func TestTOONRendererDataFieldPresent(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	r := selectRenderer(renderTOON)
+	r := output.SelectRenderer(output.RenderTOON)
 	data := sampleData{Value: "the-worktree-path"}
-	if err := r.RenderResult(&stdout, &stderr, Result{
-		Command: commandGet,
+	if err := r.RenderResult(&stdout, &stderr, output.Result{
+		Command: output.CommandGet,
 		Data:    data,
 	}); err != nil {
 		t.Fatalf("RenderResult: %v", err)
@@ -105,9 +106,9 @@ func TestTOONRendererDataFieldPresent(t *testing.T) {
 // a generic map and that all top-level envelope keys are present.
 func TestTOONRendererIsDecodable(t *testing.T) {
 	var stdout bytes.Buffer
-	r := selectRenderer(renderTOON)
-	if err := r.RenderResult(&stdout, &bytes.Buffer{}, Result{
-		Command: commandLs,
+	r := output.SelectRenderer(output.RenderTOON)
+	if err := r.RenderResult(&stdout, &bytes.Buffer{}, output.Result{
+		Command: output.CommandLs,
 		Data:    sampleData{Value: "k1"},
 	}); err != nil {
 		t.Fatalf("RenderResult: %v", err)
@@ -141,9 +142,9 @@ func TestTOONRendererIsDecodable(t *testing.T) {
 // decoded and contains an "error" key with "code" and "message".
 func TestTOONRendererErrorIsDecodable(t *testing.T) {
 	var stdout bytes.Buffer
-	r := selectRenderer(renderTOON)
-	if err := r.RenderError(&stdout, &bytes.Buffer{}, &CommandError{
-		Command:  commandClose,
+	r := output.SelectRenderer(output.RenderTOON)
+	if err := r.RenderError(&stdout, &bytes.Buffer{}, &output.CommandError{
+		Command:  output.CommandClose,
 		Code:     "unsafe-refused",
 		Message:  "dirty worktree",
 		ExitCode: exitUnsafeRefused,
@@ -178,17 +179,17 @@ func TestTOONRendererErrorIsDecodable(t *testing.T) {
 // renderers expose the same top-level envelope keys (ok, command, schemaVersion,
 // data, warnings), ensuring no information gap between the two formats.
 func TestTOONAndJSONRenderersProduceSameTopLevelFields(t *testing.T) {
-	result := Result{
-		Command:  commandGet,
+	result := output.Result{
+		Command:  output.CommandGet,
 		Data:     sampleData{Value: "path"},
-		Warnings: []Warning{{Code: "w", Message: "note"}},
+		Warnings: []output.Warning{{Code: "w", Message: "note"}},
 	}
 
 	var jsonStdout, toonStdout bytes.Buffer
-	if err := selectRenderer(renderJSON).RenderResult(&jsonStdout, &bytes.Buffer{}, result); err != nil {
+	if err := output.SelectRenderer(output.RenderJSON).RenderResult(&jsonStdout, &bytes.Buffer{}, result); err != nil {
 		t.Fatalf("JSON RenderResult: %v", err)
 	}
-	if err := selectRenderer(renderTOON).RenderResult(&toonStdout, &bytes.Buffer{}, result); err != nil {
+	if err := output.SelectRenderer(output.RenderTOON).RenderResult(&toonStdout, &bytes.Buffer{}, result); err != nil {
 		t.Fatalf("TOON RenderResult: %v", err)
 	}
 
@@ -212,8 +213,8 @@ func TestTOONAndJSONRenderersProduceSameTopLevelFields(t *testing.T) {
 
 // TestTOONRendererPropagatesWriteError verifies that write errors are surfaced.
 func TestTOONRendererPropagatesWriteError(t *testing.T) {
-	r := selectRenderer(renderTOON)
-	err := r.RenderResult(failWriter{}, &bytes.Buffer{}, Result{Command: commandGet, Data: sampleData{Value: "x"}})
+	r := output.SelectRenderer(output.RenderTOON)
+	err := r.RenderResult(failWriter{}, &bytes.Buffer{}, output.Result{Command: output.CommandGet, Data: sampleData{Value: "x"}})
 	if err == nil {
 		t.Fatal("RenderResult on failing stdout = nil, want error")
 	}

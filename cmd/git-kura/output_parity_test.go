@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tooppoo/git-kura/internal/output"
 )
 
 // TestAllStructuredCommandsHaveHumanRenderable verifies that every structured
@@ -32,7 +34,7 @@ func TestAllStructuredCommandsHaveHumanRenderable(t *testing.T) {
 		"sealDoctorData":  sealDoctorData{Healthy: true, Summary: sealDoctorSummary{}, Findings: []sealDoctorFinding{}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, ok := data.(HumanRenderable); !ok {
+			if _, ok := data.(output.HumanRenderable); !ok {
 				t.Fatalf("%s does not implement HumanRenderable; user-actionable information would be silently dropped in human mode", name)
 			}
 		})
