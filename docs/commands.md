@@ -96,16 +96,17 @@ Kura should refuse to remove a worktree when doing so would discard uncommitted 
 
 After taking the lock, `close` reads and validates `paths.json` before any destructive cleanup. An absent `paths.json` is treated as an empty seal store and cleanup continues. If `paths.json` cannot be read or does not conform to the seal store schema, `close` does not start cleanup and leaves the worktree, branch, `paths.json`, and metadata unchanged. Only the seals whose `entry.key` equals the closed key are removed; claims held by other keys are left untouched.
 
-## `git kura ls [--json]`
+## `git kura ls [--json] [--toon]`
 
 List all currently open worktrees managed by Kura.
 
 ```sh
 git kura ls
 git kura ls --json
+git kura ls --toon
 ```
 
-Without `--json`, prints one key per line to standard output, sorted alphabetically. If no worktrees are currently open, the output is empty and the exit code is 0.
+Without `--json` or `--toon`, prints one key per line to standard output, sorted alphabetically. If no worktrees are currently open, the output is empty and the exit code is 0.
 
 This command is designed for scripts and enumeration:
 
@@ -115,7 +116,7 @@ for key in $(git kura ls); do
 done
 ```
 
-With `--json`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
+With `--json` or `--toon`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
 
 ```json
 {
@@ -155,7 +156,7 @@ Additionally, Kura rejects keys that:
 `git kura seal` manages *path seals* scoped to a seal key.
 The command reference is below. For the concepts behind these commands — how they are classified, the meaning of *project scope*, and which commands depend on the current seal key — see [Seal commands: context and scope](commands/seal-commands.md).
 
-## `git kura seal claim <path> [path...]`
+## `git kura seal claim [--json] [--toon] <path> [path...]`
 
 Claim one or more repository-relative file paths for the current key in the seal store. Claiming records that the current task intends to edit those paths so conflicting edits across tasks/worktrees are detected before merge.
 
@@ -173,7 +174,21 @@ Paths are interpreted relative to the repository root regardless of the current 
 
 Exits with `seal-conflict` (code 6) if any path is already claimed by a different key. Exits with `seal-lock-timeout` (code 5) if the store lock cannot be acquired within the retry timeout.
 
-## `git kura seal unclaim <path> [path...]`
+With `--json` or `--toon`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
+
+```json
+{
+  "currentKey": "issue-18",
+  "paths": [
+    { "path": "src/foo.go", "status": "claimed" },
+    { "path": "src/bar.go", "status": "already-owned" }
+  ]
+}
+```
+
+`--json` and `--toon` are mutually exclusive; combining them is a usage error (exit code 2).
+
+## `git kura seal unclaim [--json] [--toon] <path> [path...]`
 
 Release the current key's claim on one or more file paths in the seal store.
 
@@ -184,7 +199,21 @@ git kura seal unclaim src/foo.go tests/foo_test.go
 
 Only the key that claimed a path may release it. Attempting to unclaim a path claimed by a different key exits with `seal-conflict` (code 6). Paths not currently claimed are silently skipped (idempotent).
 
-## `git kura seal test [--json] <path> [path...]`
+With `--json` or `--toon`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
+
+```json
+{
+  "currentKey": "issue-18",
+  "paths": [
+    { "path": "src/foo.go", "status": "released" },
+    { "path": "src/bar.go", "status": "not-claimed" }
+  ]
+}
+```
+
+`--json` and `--toon` are mutually exclusive; combining them is a usage error (exit code 2).
+
+## `git kura seal test [--json] [--toon] <path> [path...]`
 
 Check whether one or more repository-relative paths may be handled in the current seal context, without modifying the store. `seal test` answers a single question: given the current key, is every listed path safe to edit?
 
@@ -202,7 +231,7 @@ A path is safe when it is unclaimed, or already claimed by the current key. A pa
 
 `seal test` exits 0 only when every path is safe. If any path conflicts it exits with `seal-conflict` (code 6) and reports each conflicting path with the key that claims it. `seal test` is read-only: it does not modify the store and does not take the store lock, so it is never blocked by a held `paths.lock`.
 
-With `--json`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
+With `--json` or `--toon`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
 
 ```json
 {
@@ -229,9 +258,9 @@ With `--json`, emits a [common output envelope](adr/20260617T070134Z_output-fram
 
 When `passed` is `false`, `ok` is still `true` — the diagnostic ran successfully and produced a result — but the exit code is `seal-conflict` (6), preserving the existing CLI contract. See [`docs/adr/20260619T150000Z_diagnostic-output-execution-vs-result.md`](adr/20260619T150000Z_diagnostic-output-execution-vs-result.md) for the rationale.
 
-When current key resolution fails, `ok` is `false` and `error.code` is `current-key-unresolved`. `error.details.reason` provides a sub-classification: `not-inside-git-repository`, `not-in-managed-worktree`, `metadata-missing`, or `metadata-inconsistent`. `--json` must appear **before** the path arguments; any flag after the first path is a usage error.
+When current key resolution fails, `ok` is `false` and `error.code` is `current-key-unresolved`. `error.details.reason` provides a sub-classification: `not-inside-git-repository`, `not-in-managed-worktree`, `metadata-missing`, or `metadata-inconsistent`. `--json` or `--toon` must appear **before** the path arguments; any flag after the first path is a usage error. `--json` and `--toon` are mutually exclusive.
 
-## `git kura seal ls [--json] [key]`
+## `git kura seal ls [--json] [--toon] [key]`
 
 List claimed paths recorded in the seal store, one per line:
 
@@ -252,7 +281,7 @@ An absent store, an empty store, or a key with no claimed paths all produce empt
 
 `ls` is read-only and does not take the store lock, so it is never blocked by a held `paths.lock`.
 
-With `--json`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
+With `--json` or `--toon`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
 
 ```json
 {
@@ -263,9 +292,9 @@ With `--json`, emits a [common output envelope](adr/20260617T070134Z_output-fram
 }
 ```
 
-`filterKey` is `null` for project-wide listing and the key string when a key argument is given. `claims` is always present (`[]` when empty). Each claim item always includes both `key` and `path` regardless of whether `filterKey` is set. `--json` must appear **before** the optional key argument; `seal ls <key> --json` is a usage error. See [`docs/adr/20260618T145559Z_seal-ls-json-uses-unified-claim-shape.md`](adr/20260618T145559Z_seal-ls-json-uses-unified-claim-shape.md) for the rationale.
+`filterKey` is `null` for project-wide listing and the key string when a key argument is given. `claims` is always present (`[]` when empty). Each claim item always includes both `key` and `path` regardless of whether `filterKey` is set. `--json`/`--toon` must appear **before** the optional key argument; `seal ls <key> --json` is a usage error. `--json` and `--toon` are mutually exclusive. See [`docs/adr/20260618T145559Z_seal-ls-json-uses-unified-claim-shape.md`](adr/20260618T145559Z_seal-ls-json-uses-unified-claim-shape.md) for the rationale.
 
-## `git kura seal doctor [--json]`
+## `git kura seal doctor [--json] [--toon]`
 
 Validate the project-wide path seal store for the Git repository resolved from the current working directory.
 
@@ -281,7 +310,7 @@ An absent `paths.json` is treated as an empty store and succeeds. A healthy stor
 
 If the store is malformed or inconsistent, `doctor` exits with `seal-doctor-error` (code 7) and reports every problematic store entry it finds on stderr, so all issues can be fixed in a single pass. `doctor` is read-only: it does not modify `paths.json`, does not take `paths.lock`, and does not create, remove, or rewrite a lock file.
 
-With `--json`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
+With `--json` or `--toon`, emits a [common output envelope](adr/20260617T070134Z_output-framework-envelope-result-renderer.md) whose `data` field is:
 
 ```json
 {
@@ -293,7 +322,7 @@ With `--json`, emits a [common output envelope](adr/20260617T070134Z_output-fram
 
 `healthy` is `true` only when no findings are reported. `summary.checkedClaims` is the number of store entries inspected. `findings` is always present (`[]` when healthy). Each finding includes `severity` (`error` or `warning`), `code` (a hyphen-case token identifying the violation), `path` (the offending store path, or `null` for store-level findings), and `message` (a human-readable description).
 
-When `healthy` is `false`, `ok` is still `true` — the store was read and inspected successfully — but the exit code is `seal-doctor-error` (7), preserving the existing CLI contract. When the store cannot be read or parsed, `ok` is `false`, `error.code` is `seal-doctor-error`, and the exit code is also 7. See [`docs/adr/20260619T150000Z_diagnostic-output-execution-vs-result.md`](adr/20260619T150000Z_diagnostic-output-execution-vs-result.md) for the rationale.
+When `healthy` is `false`, `ok` is still `true` — the store was read and inspected successfully — but the exit code is `seal-doctor-error` (7), preserving the existing CLI contract. When the store cannot be read or parsed, `ok` is `false`, `error.code` is `seal-doctor-error`, and the exit code is also 7. `--json` and `--toon` are mutually exclusive. See [`docs/adr/20260619T150000Z_diagnostic-output-execution-vs-result.md`](adr/20260619T150000Z_diagnostic-output-execution-vs-result.md) for the rationale.
 
 ## Tools commands
 

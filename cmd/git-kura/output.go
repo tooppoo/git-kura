@@ -1,12 +1,13 @@
 package main
 
-// Output framework: structured result -> renderer -> human or JSON envelope.
+// Output framework: structured result -> renderer -> human, JSON, or TOON envelope.
 //
 // Structured-output command executions do not assemble display strings on
 // stdout/stderr directly. They build a Result (on success) or return a
 // CommandError (on failure). A Renderer turns that intermediate representation
-// into output: the human renderer writes existing-style text, and the JSON
-// renderer writes a schema-valid common Envelope.
+// into output: the human renderer writes existing-style text, the JSON renderer
+// writes a schema-valid common Envelope, and the TOON renderer writes the same
+// validated Envelope in Token-Oriented Object Notation for AI-friendly output.
 //
 // Renderers never depend on command-specific types: they treat a Result's Data
 // and a CommandError's Details as opaque values, and delegate human formatting
@@ -15,8 +16,9 @@ package main
 //
 // Scalar output (get --path / --branch / --root) is shell-substitution input
 // and is intentionally not routed through this framework; it keeps printing a
-// single bare value via fmt.Println. Scalar output and --json are mutually
-// exclusive (a usage error), so a scalar request never produces an envelope.
+// single bare value via fmt.Println. Scalar output and --json/--toon are
+// mutually exclusive (a usage error), so a scalar request never produces an
+// envelope.
 
 import (
 	"bytes"
@@ -26,6 +28,7 @@ import (
 	"io"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
+	toon "github.com/toon-format/toon-go"
 )
 
 // envelopeSchemaVersion is the schema version stamped into every structured
@@ -162,14 +165,15 @@ type Renderer interface {
 	RenderError(stdout, stderr io.Writer, e *CommandError) error
 }
 
-// renderMode selects between human-readable and JSON structured output. It is
-// the renderer-relevant projection of the CLI output mode; scalar modes never
-// reach a renderer.
+// renderMode selects between human-readable, JSON, and TOON structured output.
+// It is the renderer-relevant projection of the CLI output mode; scalar modes
+// never reach a renderer.
 type renderMode int
 
 const (
 	renderHuman renderMode = iota
 	renderJSON
+	renderTOON
 )
 
 // selectRenderer returns the renderer for the given mode. This is the
@@ -177,10 +181,14 @@ const (
 // Result or CommandError to the selected renderer, which owns all stdout/stderr
 // writing for structured output.
 func selectRenderer(mode renderMode) Renderer {
-	if mode == renderJSON {
+	switch mode {
+	case renderJSON:
 		return jsonRenderer{}
+	case renderTOON:
+		return toonRenderer{}
+	default:
+		return humanRenderer{}
 	}
-	return humanRenderer{}
 }
 
 // humanRenderer writes existing-style human output: command-specific success
@@ -237,6 +245,63 @@ func (jsonRenderer) RenderError(stdout, stderr io.Writer, e *CommandError) error
 			Details: e.Details,
 		},
 	})
+}
+
+// toonRenderer writes a schema-valid common Envelope in TOON format to stdout
+// for both success and failure. It reuses the same encodeEnvelope validation
+// helper as jsonRenderer; the validated JSON bytes are then decoded to a generic
+// map and re-encoded as TOON so that field names follow the JSON tag conventions
+// (camelCase) rather than Go field names.
+//
+// TOON output is experimental: its whitespace, line breaks, and field order are
+// not part of the stable contract. The stable contract is the JSON envelope and
+// the command-specific JSON Schemas.
+type toonRenderer struct{}
+
+func (toonRenderer) RenderResult(stdout, stderr io.Writer, r Result) error {
+	return writeTOONEnvelope(stdout, Envelope{
+		OK:            true,
+		Command:       r.Command,
+		SchemaVersion: envelopeSchemaVersion,
+		Data:          r.Data,
+		Warnings:      normalizeWarnings(r.Warnings),
+	})
+}
+
+func (toonRenderer) RenderError(stdout, stderr io.Writer, e *CommandError) error {
+	return writeTOONEnvelope(stdout, Envelope{
+		OK:            false,
+		Command:       e.Command,
+		SchemaVersion: envelopeSchemaVersion,
+		Warnings:      normalizeWarnings(e.Warnings),
+		Error: &envelopeError{
+			Code:    e.Code,
+			Message: e.Message,
+			Details: e.Details,
+		},
+	})
+}
+
+// writeTOONEnvelope encodes and validates e via the shared encodeEnvelope
+// helper, then converts the validated JSON representation to TOON. Converting
+// through the JSON bytes (rather than marshalling the Envelope struct directly)
+// preserves camelCase field names from JSON struct tags and ensures all values
+// are basic Go types that the TOON encoder handles without special cases.
+func writeTOONEnvelope(w io.Writer, e Envelope) error {
+	jsonBytes, err := encodeEnvelope(e)
+	if err != nil {
+		return err
+	}
+	var decoded any
+	if err := json.Unmarshal(jsonBytes, &decoded); err != nil {
+		return fmt.Errorf("internal: decode envelope for toon: %w", err)
+	}
+	out, err := toon.MarshalString(decoded)
+	if err != nil {
+		return fmt.Errorf("internal: toon encoding failed: %w", err)
+	}
+	_, err = fmt.Fprintln(w, out)
+	return err
 }
 
 // normalizeWarnings guarantees a non-nil slice so warnings marshals to a JSON

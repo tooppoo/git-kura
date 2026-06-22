@@ -162,5 +162,6 @@ A consumer would then have to handle both a missing field and an empty array.
 
 ### Neutral Consequences
 
-- Scalar output and `--toon` are deliberately outside this framework; scalar output stays a bare value and `--toon` is handled separately.
+- Scalar output (`--path`, `--branch`, `--root`) is deliberately outside this framework and stays a bare value.
+- `--toon` was initially handled separately but was migrated into the framework (issue #51): the TOON renderer implements the same `Renderer` interface and writes the full envelope via the shared `encodeEnvelope` validation path.
 - The framework is introduced unused by production commands in this issue; commands migrate onto it in follow-up issues.
