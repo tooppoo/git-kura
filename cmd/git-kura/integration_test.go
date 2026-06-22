@@ -503,9 +503,8 @@ func TestGetStructuredOutputFailsWhenMetadataIsMissing(t *testing.T) {
 
 	toonResult := cli.gitKura(repo, "get", "51", "--toon")
 	requireNonZeroExitCode(t, toonResult)
-	requireEmptyStdout(t, toonResult)
-	requireStderrContains(t, toonResult, "metadata")
-	requireStderrContains(t, toonResult, "missing")
+	requireEmptyStderr(t, toonResult)
+	requireTOONErrorMessageContains(t, toonResult.stdout, "get", "metadata", "missing")
 
 	pathResult := cli.gitKura(repo, "get", "51", "--path")
 	requireNonZeroExitCode(t, pathResult)
@@ -546,9 +545,8 @@ func TestGetStructuredOutputFailsForUnopenedKey(t *testing.T) {
 
 	toonResult := cli.gitKura(repo, "get", "2", "--toon")
 	requireNonZeroExitCode(t, toonResult)
-	requireEmptyStdout(t, toonResult)
-	requireStderrContains(t, toonResult, "not open")
-	requireStderrContains(t, toonResult, "git kura open 2")
+	requireEmptyStderr(t, toonResult)
+	requireTOONErrorMessageContains(t, toonResult.stdout, "get", "not open", "git kura open 2")
 }
 
 func TestGetTOONOutputContainsMetadataFields(t *testing.T) {
@@ -1450,7 +1448,7 @@ func TestSealLsHelpFlag(t *testing.T) {
 
 	result := cli.gitKura(repo, "seal", "ls", "--help")
 	requireExitCode(t, result, 0)
-	if !strings.Contains(result.stdout, "Usage: git kura seal ls [--json] [key]") {
+	if !strings.Contains(result.stdout, "Usage: git kura seal ls [--json] [--toon] [key]") {
 		t.Fatalf("help output = %s, want usage line", result.stdout)
 	}
 }
@@ -2352,4 +2350,137 @@ func TestSealDoctorJSONConformsToEnvelopeSchema(t *testing.T) {
 	result := cli.gitKura(repo, "seal", "doctor", "--json")
 	requireExitCode(t, result, 0)
 	requireConformsToEnvelopeSchema(t, result.stdout)
+}
+
+// --- TOON smoke tests for commands with --toon support ---
+// These verify that each command's --toon flag routes through the TOON renderer
+// and produces a recognisable TOON envelope on stdout with an empty stderr.
+
+func TestOpenTOON(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "open", "51", "--toon")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	for _, want := range []string{"ok", "command", "schemaVersion"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Fatalf("toon output missing field %q\noutput: %s", want, result.stdout)
+		}
+	}
+}
+
+func TestCloseTOON(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+
+	result := cli.gitKura(repo, "close", "51", "--toon")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	for _, want := range []string{"ok", "command", "schemaVersion"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Fatalf("toon output missing field %q\noutput: %s", want, result.stdout)
+		}
+	}
+}
+
+func TestLsTOON(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+
+	result := cli.gitKura(repo, "ls", "--toon")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	for _, want := range []string{"ok", "command", "schemaVersion"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Fatalf("toon output missing field %q\noutput: %s", want, result.stdout)
+		}
+	}
+}
+
+func TestSealLsTOON(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "seal", "ls", "--toon")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	for _, want := range []string{"ok", "command", "schemaVersion"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Fatalf("toon output missing field %q\noutput: %s", want, result.stdout)
+		}
+	}
+}
+
+func TestSealClaimTOON(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "51")
+
+	result := cli.gitKura(wt, "seal", "claim", "--toon", "tracked.txt")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	for _, want := range []string{"ok", "command", "schemaVersion"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Fatalf("toon output missing field %q\noutput: %s", want, result.stdout)
+		}
+	}
+}
+
+func TestSealUnclaimTOON(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "51")
+	requireExitCode(t, cli.gitKura(wt, "seal", "claim", "tracked.txt"), 0)
+
+	result := cli.gitKura(wt, "seal", "unclaim", "--toon", "tracked.txt")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	for _, want := range []string{"ok", "command", "schemaVersion"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Fatalf("toon output missing field %q\noutput: %s", want, result.stdout)
+		}
+	}
+}
+
+func TestSealTestTOON(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "51")
+	requireExitCode(t, cli.gitKura(wt, "seal", "claim", "tracked.txt"), 0)
+
+	result := cli.gitKura(wt, "seal", "test", "--toon", "tracked.txt")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	for _, want := range []string{"ok", "command", "schemaVersion"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Fatalf("toon output missing field %q\noutput: %s", want, result.stdout)
+		}
+	}
+}
+
+func TestSealDoctorTOON(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "seal", "doctor", "--toon")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+
+	for _, want := range []string{"ok", "command", "schemaVersion"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Fatalf("toon output missing field %q\noutput: %s", want, result.stdout)
+		}
+	}
 }

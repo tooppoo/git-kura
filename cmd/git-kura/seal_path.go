@@ -571,7 +571,7 @@ func cmdSealClaim(opts sealClaimOptions, rawPaths []string) error {
 			ExitCode: exitSealConflict,
 			Details:  details,
 		}
-		if !opts.JSON {
+		if opts.renderMode() == renderHuman {
 			// Return the first non-conflict blocking error with a descriptive message;
 			// collect owned-by-other conflicts for the aggregated conflict error.
 			var conflicts []sealConflict
@@ -589,7 +589,7 @@ func cmdSealClaim(opts sealClaimOptions, rawPaths []string) error {
 				return sealConflictError(conflicts)
 			}
 		}
-		return emitError(renderJSON, cerr)
+		return emitError(opts.renderMode(), cerr)
 	}
 
 	for _, r := range results {
@@ -607,12 +607,11 @@ func cmdSealClaim(opts sealClaimOptions, rawPaths []string) error {
 	}
 	data := sealClaimData{CurrentKey: key, Paths: pathItems}
 
-	mode := renderHuman
-	if opts.JSON {
+	mode := opts.renderMode()
+	if mode != renderHuman {
 		if err := validateData(sealClaimDataSchema, data); err != nil {
 			return err
 		}
-		mode = renderJSON
 	}
 	return emitResult(mode, Result{Command: commandSealClaim, Data: data})
 }
@@ -621,13 +620,14 @@ func cmdSealClaim(opts sealClaimOptions, rawPaths []string) error {
 // For store-level failures (read-store, write-store), use sealClaimStoreFail
 // so that the required storeError field is included.
 func sealClaimFail(opts sealClaimOptions, phase string, err error) error {
-	if !opts.JSON {
+	mode := opts.renderMode()
+	if mode == renderHuman {
 		return err
 	}
 	details := sealMutationErrorDetails{Phase: phase}
 	cerr := toCommandError(commandSealClaim, err)
 	cerr.Details = details
-	return emitError(renderJSON, cerr)
+	return emitError(mode, cerr)
 }
 
 // sealClaimStoreFail routes a seal claim store-level failure (read-store,
@@ -635,7 +635,8 @@ func sealClaimFail(opts sealClaimOptions, phase string, err error) error {
 // error.details.storeError with the failed phase status and the store file path
 // as required by Issue #63.
 func sealClaimStoreFail(opts sealClaimOptions, phase string, storeFile string, err error) error {
-	if !opts.JSON {
+	mode := opts.renderMode()
+	if mode == renderHuman {
 		return err
 	}
 	statusMap := map[string]string{
@@ -649,7 +650,7 @@ func sealClaimStoreFail(opts sealClaimOptions, phase string, storeFile string, e
 	}
 	cerr := toCommandError(commandSealClaim, err)
 	cerr.Details = details
-	return emitError(renderJSON, cerr)
+	return emitError(mode, cerr)
 }
 
 func cmdSealUnclaim(opts sealUnclaimOptions, rawPaths []string) error {
@@ -797,7 +798,7 @@ func cmdSealUnclaim(opts sealUnclaimOptions, rawPaths []string) error {
 			ExitCode: exitSealConflict,
 			Details:  details,
 		}
-		if !opts.JSON {
+		if opts.renderMode() == renderHuman {
 			var conflicts []sealConflict
 			for _, r := range results {
 				if !r.blocking {
@@ -813,7 +814,7 @@ func cmdSealUnclaim(opts sealUnclaimOptions, rawPaths []string) error {
 				return sealConflictError(conflicts)
 			}
 		}
-		return emitError(renderJSON, cerr)
+		return emitError(opts.renderMode(), cerr)
 	}
 
 	for _, r := range results {
@@ -831,12 +832,11 @@ func cmdSealUnclaim(opts sealUnclaimOptions, rawPaths []string) error {
 	}
 	data := sealUnclaimData{CurrentKey: key, Paths: pathItems}
 
-	mode := renderHuman
-	if opts.JSON {
+	mode := opts.renderMode()
+	if mode != renderHuman {
 		if err := validateData(sealUnclaimDataSchema, data); err != nil {
 			return err
 		}
-		mode = renderJSON
 	}
 	return emitResult(mode, Result{Command: commandSealUnclaim, Data: data})
 }
@@ -844,19 +844,21 @@ func cmdSealUnclaim(opts sealUnclaimOptions, rawPaths []string) error {
 // sealUnclaimFail routes a seal unclaim preflight failure to the right output.
 // For store-level failures (read-store, write-store), use sealUnclaimStoreFail.
 func sealUnclaimFail(opts sealUnclaimOptions, phase string, err error) error {
-	if !opts.JSON {
+	mode := opts.renderMode()
+	if mode == renderHuman {
 		return err
 	}
 	details := sealMutationErrorDetails{Phase: phase}
 	cerr := toCommandError(commandSealUnclaim, err)
 	cerr.Details = details
-	return emitError(renderJSON, cerr)
+	return emitError(mode, cerr)
 }
 
 // sealUnclaimStoreFail routes a seal unclaim store-level failure to the right
 // output, including the required error.details.storeError field.
 func sealUnclaimStoreFail(opts sealUnclaimOptions, phase string, storeFile string, err error) error {
-	if !opts.JSON {
+	mode := opts.renderMode()
+	if mode == renderHuman {
 		return err
 	}
 	statusMap := map[string]string{
@@ -870,7 +872,7 @@ func sealUnclaimStoreFail(opts sealUnclaimOptions, phase string, storeFile strin
 	}
 	cerr := toCommandError(commandSealUnclaim, err)
 	cerr.Details = details
-	return emitError(renderJSON, cerr)
+	return emitError(mode, cerr)
 }
 
 // cmdSealTest checks whether every path in rawPaths may be handled in the
@@ -954,23 +956,24 @@ func cmdSealTest(opts sealTestOptions, rawPaths []string) error {
 		Results:    results,
 	}
 
-	if opts.JSON {
+	mode := opts.renderMode()
+	if mode != renderHuman {
 		if err := validateData(sealTestDataSchema, data); err != nil {
 			return err
 		}
-		if err := emitResult(renderJSON, Result{Command: commandSealTest, Data: data}); err != nil {
+		if err := emitResult(mode, Result{Command: commandSealTest, Data: data}); err != nil {
 			return err
 		}
 		if !passed {
-			// Conflict is a business result in JSON mode: ok:true but exit 6.
+			// Conflict is a business result in JSON/TOON mode: ok:true but exit 6.
 			return &renderedError{code: exitSealConflict}
 		}
 		return nil
 	}
 
 	// Human mode: route through the framework so the structured result feeds
-	// both JSON and human renderers from the same data. Conflicts go to stdout
-	// as a business result (ok:true, passed:false), not to stderr as an error.
+	// both JSON/TOON and human renderers from the same data. Conflicts go to
+	// stdout as a business result (ok:true, passed:false), not to stderr.
 	if err := emitResult(renderHuman, Result{Command: commandSealTest, Data: data}); err != nil {
 		return err
 	}
@@ -981,24 +984,26 @@ func cmdSealTest(opts sealTestOptions, rawPaths []string) error {
 }
 
 // sealTestFail routes a seal test execution failure to the right output.
-// JSON requests render an ok:false envelope on stdout; plain requests keep the
-// existing error behavior.
+// JSON/TOON requests render an ok:false envelope on stdout; plain requests keep
+// the existing error behavior.
 func sealTestFail(opts sealTestOptions, err error) error {
-	if !opts.JSON {
+	mode := opts.renderMode()
+	if mode == renderHuman {
 		return err
 	}
-	return emitError(renderJSON, toCommandError(commandSealTest, err))
+	return emitError(mode, toCommandError(commandSealTest, err))
 }
 
 // sealTestCurrentKeyFail handles the current-key-unresolved failure for seal
-// test. In JSON mode it produces a structured ok:false envelope with reason
+// test. In JSON/TOON mode it produces a structured ok:false envelope with reason
 // details; in human mode it returns a plain error with the current-key-unresolved
 // token in the message.
 func sealTestCurrentKeyFail(opts sealTestOptions, keyErr error, repoTop string) error {
 	reason, metaPath := classifyCurrentKeyError(keyErr, repoTop)
 	msg := fmt.Sprintf("current-key-unresolved: %s", keyErr.Error())
 
-	if !opts.JSON {
+	mode := opts.renderMode()
+	if mode == renderHuman {
 		return fmt.Errorf("%s", msg)
 	}
 
@@ -1018,7 +1023,7 @@ func sealTestCurrentKeyFail(opts sealTestOptions, keyErr error, repoTop string) 
 			MetadataPath:   metaPath,
 		},
 	}
-	return emitError(renderJSON, cerr)
+	return emitError(mode, cerr)
 }
 
 // classifyCurrentKeyError derives the structured reason token from a

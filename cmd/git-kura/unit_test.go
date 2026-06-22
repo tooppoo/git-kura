@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -412,7 +413,7 @@ func TestToCommandError(t *testing.T) {
 	})
 }
 
-func TestPrintTOONFormat(t *testing.T) {
+func TestTOONRendererFormat(t *testing.T) {
 	data := worktreeJSON{
 		SchemaVersion:  1,
 		Key:            "test-51",
@@ -425,19 +426,27 @@ func TestPrintTOONFormat(t *testing.T) {
 		Dirty:          false,
 	}
 
-	stdout, err := captureStdout(t, func() error { return printTOON(data) })
-	if err != nil {
-		t.Fatalf("printTOON error = %v", err)
+	var buf bytes.Buffer
+	r := selectRenderer(renderTOON)
+	if err := r.RenderResult(&buf, &bytes.Buffer{}, Result{Command: commandGet, Data: data}); err != nil {
+		t.Fatalf("RenderResult error = %v", err)
 	}
+	out := buf.String()
 
-	for _, line := range strings.Split(strings.TrimRight(stdout, "\n"), "\n") {
+	// Lines that end with ':' (section headers like "data:" or "warnings[0]:")
+	// are valid TOON syntax and do not carry a value on the same line.
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasSuffix(trimmed, ":") {
+			continue
+		}
 		if !strings.Contains(line, ": ") {
 			t.Errorf("line %q does not use ': ' separator", line)
 		}
 	}
 }
 
-func TestPrintTOONFields(t *testing.T) {
+func TestTOONRendererFields(t *testing.T) {
 	data := worktreeJSON{
 		SchemaVersion:  1,
 		Key:            "test-51",
@@ -450,11 +459,14 @@ func TestPrintTOONFields(t *testing.T) {
 		Dirty:          false,
 	}
 
-	stdout, err := captureStdout(t, func() error { return printTOON(data) })
-	if err != nil {
-		t.Fatalf("printTOON error = %v", err)
+	var buf bytes.Buffer
+	r := selectRenderer(renderTOON)
+	if err := r.RenderResult(&buf, &bytes.Buffer{}, Result{Command: commandGet, Data: data}); err != nil {
+		t.Fatalf("RenderResult error = %v", err)
 	}
+	out := buf.String()
 
+	// Data fields must appear somewhere in the TOON envelope output.
 	for field, want := range map[string]string{
 		"schemaVersion":  "schemaVersion: 1",
 		"key":            "key: test-51",
@@ -466,14 +478,9 @@ func TestPrintTOONFields(t *testing.T) {
 		"exists":         "exists: true",
 		"dirty":          "dirty: false",
 	} {
-		if !strings.Contains(stdout, want) {
-			t.Errorf("field %q: stdout does not contain %q\nfull output:\n%s", field, want, stdout)
+		if !strings.Contains(out, want) {
+			t.Errorf("field %q: output does not contain %q\nfull output:\n%s", field, want, out)
 		}
-	}
-
-	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 9 {
-		t.Errorf("line count = %d, want 9\nfull output:\n%s", len(lines), stdout)
 	}
 }
 
@@ -2988,5 +2995,232 @@ func TestEncodeEnvelopeSchemaValidationFailure(t *testing.T) {
 	_, err := encodeEnvelope(Envelope{})
 	if err == nil {
 		t.Fatal("expected schema validation error for empty Envelope, got nil")
+	}
+}
+
+// TestWriteTOONEnvelopeSchemaError verifies that writeTOONEnvelope surfaces the
+// encodeEnvelope error rather than silently swallowing it.
+func TestWriteTOONEnvelopeSchemaError(t *testing.T) {
+	var buf bytes.Buffer
+	err := writeTOONEnvelope(&buf, Envelope{})
+	if err == nil {
+		t.Fatal("writeTOONEnvelope with invalid envelope: expected error, got nil")
+	}
+}
+
+// TestRenderModeTOON verifies that the renderMode helper on each options struct
+// returns renderTOON when Toon is set, renderJSON when only JSON is set, and
+// renderHuman when neither is set. These are pure-function tests; no git repo needed.
+func TestRenderModeTOON(t *testing.T) {
+	requireMode := func(t *testing.T, got, want renderMode, label string) {
+		t.Helper()
+		if got != want {
+			t.Fatalf("%s: got %v, want %v", label, got, want)
+		}
+	}
+
+	t.Run("openOptions", func(t *testing.T) {
+		toon, json, human := openOptions{Toon: true}, openOptions{JSON: true}, openOptions{}
+		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), renderHuman, "default")
+	})
+
+	t.Run("closeOptions", func(t *testing.T) {
+		toon, json, human := closeOptions{Toon: true}, closeOptions{JSON: true}, closeOptions{}
+		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), renderHuman, "default")
+	})
+
+	t.Run("lsOptions", func(t *testing.T) {
+		toon, json, human := lsOptions{Toon: true}, lsOptions{JSON: true}, lsOptions{}
+		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), renderHuman, "default")
+	})
+
+	t.Run("sealLsOptions", func(t *testing.T) {
+		toon, json, human := sealLsOptions{Toon: true}, sealLsOptions{JSON: true}, sealLsOptions{}
+		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), renderHuman, "default")
+	})
+
+	t.Run("sealTestOptions", func(t *testing.T) {
+		toon, json, human := sealTestOptions{Toon: true}, sealTestOptions{JSON: true}, sealTestOptions{}
+		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), renderHuman, "default")
+	})
+
+	t.Run("sealDoctorOptions", func(t *testing.T) {
+		toon, json, human := sealDoctorOptions{Toon: true}, sealDoctorOptions{JSON: true}, sealDoctorOptions{}
+		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), renderHuman, "default")
+	})
+
+	t.Run("sealClaimOptions", func(t *testing.T) {
+		toon, json, human := sealClaimOptions{Toon: true}, sealClaimOptions{JSON: true}, sealClaimOptions{}
+		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), renderHuman, "default")
+	})
+
+	t.Run("sealUnclaimOptions", func(t *testing.T) {
+		toon, json, human := sealUnclaimOptions{Toon: true}, sealUnclaimOptions{JSON: true}, sealUnclaimOptions{}
+		requireMode(t, toon.renderMode(), renderTOON, "Toon=true")
+		requireMode(t, json.renderMode(), renderJSON, "JSON=true")
+		requireMode(t, human.renderMode(), renderHuman, "default")
+	})
+}
+
+// TestParseArgsTOONFlag tests the --toon parsing branch in each command's
+// argument parser. These are pure parser tests; no git repo is needed.
+
+func TestParseOpenArgsTOONFlag(t *testing.T) {
+	_, opts, err := parseOpenArgs([]string{"51", "--toon"})
+	if err != nil {
+		t.Fatalf("parseOpenArgs with --toon: %v", err)
+	}
+	if !opts.Toon {
+		t.Fatal("opts.Toon = false, want true")
+	}
+}
+
+func TestParseOpenArgsJSONAndTOONIsUsageError(t *testing.T) {
+	for _, args := range [][]string{
+		{"51", "--json", "--toon"},
+		{"51", "--toon", "--json"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			_, _, err := parseOpenArgs(args)
+			if err == nil {
+				t.Fatal("expected usage error, got nil")
+			}
+			var xe *exitError
+			if !errors.As(err, &xe) || xe.code != exitUsageError {
+				t.Fatalf("expected exitUsageError, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestParseCloseArgsTOONFlag(t *testing.T) {
+	key, opts, err := parseCloseArgs([]string{"51", "--toon"})
+	if err != nil {
+		t.Fatalf("parseCloseArgs with --toon: %v", err)
+	}
+	if key != "51" {
+		t.Fatalf("key = %q, want 51", key)
+	}
+	if !opts.Toon {
+		t.Fatal("opts.Toon = false, want true")
+	}
+}
+
+func TestParseCloseArgsJSONAndTOONIsUsageError(t *testing.T) {
+	for _, args := range [][]string{
+		{"51", "--json", "--toon"},
+		{"51", "--toon", "--json"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			_, _, err := parseCloseArgs(args)
+			if err == nil {
+				t.Fatal("expected usage error, got nil")
+			}
+			var xe *exitError
+			if !errors.As(err, &xe) || xe.code != exitUsageError {
+				t.Fatalf("expected exitUsageError, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestParseLsArgsTOONFlag(t *testing.T) {
+	opts, err := parseLsArgs([]string{"--toon"})
+	if err != nil {
+		t.Fatalf("parseLsArgs with --toon: %v", err)
+	}
+	if !opts.Toon {
+		t.Fatal("opts.Toon = false, want true")
+	}
+}
+
+func TestParseLsArgsJSONAndTOONIsUsageError(t *testing.T) {
+	for _, args := range [][]string{
+		{"--json", "--toon"},
+		{"--toon", "--json"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			_, err := parseLsArgs(args)
+			if err == nil {
+				t.Fatal("expected usage error, got nil")
+			}
+			var xe *exitError
+			if !errors.As(err, &xe) || xe.code != exitUsageError {
+				t.Fatalf("expected exitUsageError, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestParseSealLsArgsTOONFlag(t *testing.T) {
+	opts, err := parseSealLsArgs([]string{"--toon"})
+	if err != nil {
+		t.Fatalf("parseSealLsArgs with --toon: %v", err)
+	}
+	if !opts.Toon {
+		t.Fatal("opts.Toon = false, want true")
+	}
+}
+
+func TestParseSealTestArgsTOONFlag(t *testing.T) {
+	opts, paths, err := parseSealTestArgs([]string{"--toon", "path.go"})
+	if err != nil {
+		t.Fatalf("parseSealTestArgs with --toon: %v", err)
+	}
+	if !opts.Toon {
+		t.Fatal("opts.Toon = false, want true")
+	}
+	if len(paths) != 1 || paths[0] != "path.go" {
+		t.Fatalf("paths = %v, want [path.go]", paths)
+	}
+}
+
+func TestParseSealDoctorArgsTOONFlag(t *testing.T) {
+	opts, err := parseSealDoctorArgs([]string{"--toon"})
+	if err != nil {
+		t.Fatalf("parseSealDoctorArgs with --toon: %v", err)
+	}
+	if !opts.Toon {
+		t.Fatal("opts.Toon = false, want true")
+	}
+}
+
+func TestParseSealClaimArgsTOONFlag(t *testing.T) {
+	opts, paths, err := parseSealClaimArgs([]string{"--toon", "src/foo.ts"})
+	if err != nil {
+		t.Fatalf("parseSealClaimArgs with --toon: %v", err)
+	}
+	if !opts.Toon {
+		t.Fatal("opts.Toon = false, want true")
+	}
+	if len(paths) != 1 || paths[0] != "src/foo.ts" {
+		t.Fatalf("paths = %v, want [src/foo.ts]", paths)
+	}
+}
+
+func TestParseSealUnclaimArgsTOONFlag(t *testing.T) {
+	opts, paths, err := parseSealUnclaimArgs([]string{"--toon", "src/bar.ts"})
+	if err != nil {
+		t.Fatalf("parseSealUnclaimArgs with --toon: %v", err)
+	}
+	if !opts.Toon {
+		t.Fatal("opts.Toon = false, want true")
+	}
+	if len(paths) != 1 || paths[0] != "src/bar.ts" {
+		t.Fatalf("paths = %v, want [src/bar.ts]", paths)
 	}
 }

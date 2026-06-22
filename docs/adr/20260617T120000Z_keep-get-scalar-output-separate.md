@@ -103,9 +103,9 @@ Returning a non-zero exit for a detected conflict would conflate "this condition
 ### Negative Consequences
 
 - `open --dry-run` output changes: the bare JSON object is replaced by human-readable output by default and by the common envelope under `--json`.
-- CLI parsing must reject scalar output flags combined with `--json` / `--format json` regardless of order, and reject `open --json` without `--dry-run`.
+- CLI parsing must reject scalar output flags combined with `--json` / `--format json` / `--toon` / `--format toon` regardless of order, and reject `open --json` without `--dry-run`.
 
 ### Neutral Consequences
 
 - The `get` and `open --dry-run` data payloads share the same worktree shape but are validated by separate command-specific schemas so they can version independently.
-- `--toon` output is unchanged and remains outside the envelope framework.
+- `--toon` was later migrated into the envelope framework (issue #51): `toonRenderer` implements the same `Renderer` interface and writes the full envelope. The scalar-output constraint above was updated accordingly.

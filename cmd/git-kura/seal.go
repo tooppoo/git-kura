@@ -84,22 +84,77 @@ func mustCompileSealDoctorDataSchema() *jsonschema.Schema {
 type sealLsOptions struct {
 	FilterKey string
 	JSON      bool
+	Toon      bool
+}
+
+func (o sealLsOptions) renderMode() renderMode {
+	if o.Toon {
+		return renderTOON
+	}
+	if o.JSON {
+		return renderJSON
+	}
+	return renderHuman
 }
 
 type sealTestOptions struct {
 	JSON bool
+	Toon bool
+}
+
+func (o sealTestOptions) renderMode() renderMode {
+	if o.Toon {
+		return renderTOON
+	}
+	if o.JSON {
+		return renderJSON
+	}
+	return renderHuman
 }
 
 type sealDoctorOptions struct {
 	JSON bool
+	Toon bool
+}
+
+func (o sealDoctorOptions) renderMode() renderMode {
+	if o.Toon {
+		return renderTOON
+	}
+	if o.JSON {
+		return renderJSON
+	}
+	return renderHuman
 }
 
 type sealClaimOptions struct {
 	JSON bool
+	Toon bool
+}
+
+func (o sealClaimOptions) renderMode() renderMode {
+	if o.Toon {
+		return renderTOON
+	}
+	if o.JSON {
+		return renderJSON
+	}
+	return renderHuman
 }
 
 type sealUnclaimOptions struct {
 	JSON bool
+	Toon bool
+}
+
+func (o sealUnclaimOptions) renderMode() renderMode {
+	if o.Toon {
+		return renderTOON
+	}
+	if o.JSON {
+		return renderJSON
+	}
+	return renderHuman
 }
 
 // sealClaimPathItem is one path's result in the seal claim success data.
@@ -303,7 +358,7 @@ Subcommands:
 
 Run "git kura seal <subcommand> --help" for subcommand-specific help.`
 
-const sealLsHelp = `Usage: git kura seal ls [--json] [key]
+const sealLsHelp = `Usage: git kura seal ls [--json] [--toon] [key]
 
 List claimed paths recorded in the seal store.
 
@@ -324,9 +379,11 @@ by key, then by path. An empty store produces no output and exits 0.
 
 Flags:
   --json   Print structured output as a JSON envelope. --json must appear
-           before the optional key argument.`
+           before the optional key argument.
+  --toon   Print structured output as a TOON envelope (experimental; AI-friendly).
+           --toon must appear before the optional key argument.`
 
-const sealClaimHelp = `Usage: git kura seal claim [--json] <path> [path...]
+const sealClaimHelp = `Usage: git kura seal claim [--json] [--toon] <path> [path...]
 
 Claim one or more file paths for the current key in the seal store.
 
@@ -344,6 +401,8 @@ Flags:
   --json   Print structured output as a JSON envelope. On error, exits non-zero
            with an ok:false envelope on stdout. --json must appear before the
            path arguments.
+  --toon   Print structured output as a TOON envelope (experimental; AI-friendly).
+           --toon must appear before the path arguments.
 
 Current key:
   The current key is derived from the git-kura managed worktree you are in:
@@ -352,7 +411,7 @@ Current key:
   directory is not inside a managed worktree, or when that worktree's
   metadata is missing or inconsistent.`
 
-const sealUnclaimHelp = `Usage: git kura seal unclaim [--json] <path> [path...]
+const sealUnclaimHelp = `Usage: git kura seal unclaim [--json] [--toon] <path> [path...]
 
 Release the current key's claim on one or more file paths in the seal store.
 
@@ -369,6 +428,8 @@ Flags:
   --json   Print structured output as a JSON envelope. On error, exits non-zero
            with an ok:false envelope on stdout. --json must appear before the
            path arguments.
+  --toon   Print structured output as a TOON envelope (experimental; AI-friendly).
+           --toon must appear before the path arguments.
 
 Current key:
   The current key is derived from the git-kura managed worktree you are in:
@@ -377,7 +438,7 @@ Current key:
   directory is not inside a managed worktree, or when that worktree's
   metadata is missing or inconsistent.`
 
-const sealTestHelp = `Usage: git kura seal test [--json] <path> [path...]
+const sealTestHelp = `Usage: git kura seal test [--json] [--toon] <path> [path...]
 
 Check whether one or more paths may be handled in the current seal context.
 
@@ -400,6 +461,8 @@ Flags:
            ok is true with data.passed false (conflict is a business result, not
            an execution failure). Current key resolution failures produce an
            ok:false envelope on stdout.
+  --toon   Print structured output as a TOON envelope (experimental; AI-friendly).
+           Same conflict/failure semantics as --json.
 
 Current key:
   The current key is derived from the git-kura managed worktree you are in:
@@ -408,7 +471,7 @@ Current key:
   directory is not inside a managed worktree, or when that worktree's
   metadata is missing or inconsistent.`
 
-const sealDoctorHelp = `Usage: git kura seal doctor [--json]
+const sealDoctorHelp = `Usage: git kura seal doctor [--json] [--toon]
 
 Validate the repository-wide path seal store.
 
@@ -425,7 +488,9 @@ and exits 0.
 Flags:
   --json   Print structured output as a JSON envelope. A malformed store
            produces an ok:false envelope; integrity violations produce ok:true
-           with data.healthy false and data.findings listing each violation.`
+           with data.healthy false and data.findings listing each violation.
+  --toon   Print structured output as a TOON envelope (experimental; AI-friendly).
+           Same semantics as --json.`
 
 func runSeal(args []string) error {
 	if len(args) == 0 {
@@ -483,43 +548,49 @@ func runSealUnclaim(args []string) error {
 	return cmdSealUnclaim(opts, paths)
 }
 
-// parseSealClaimArgs parses seal claim arguments. --json must appear before
-// the path arguments. At least one path is required.
+// parseSealClaimArgs parses seal claim arguments. --json/--toon must appear
+// before the path arguments. At least one path is required.
 func parseSealClaimArgs(args []string) (sealClaimOptions, []string, error) {
 	var opts sealClaimOptions
 	if len(args) > 0 && args[0] == "--json" {
 		opts.JSON = true
 		args = args[1:]
+	} else if len(args) > 0 && args[0] == "--toon" {
+		opts.Toon = true
+		args = args[1:]
 	}
 	if len(args) == 0 {
 		return sealClaimOptions{}, nil, exitCodeError(exitUsageError,
-			fmt.Errorf("usage: git kura seal claim [--json] <path> [path...]"))
+			fmt.Errorf("usage: git kura seal claim [--json] [--toon] <path> [path...]"))
 	}
 	for _, a := range args {
 		if strings.HasPrefix(a, "-") {
 			return sealClaimOptions{}, nil, exitCodeError(exitUsageError,
-				fmt.Errorf("usage: git kura seal claim [--json] <path> [path...]: unknown option %q", a))
+				fmt.Errorf("usage: git kura seal claim [--json] [--toon] <path> [path...]: unknown option %q", a))
 		}
 	}
 	return opts, args, nil
 }
 
-// parseSealUnclaimArgs parses seal unclaim arguments. --json must appear
+// parseSealUnclaimArgs parses seal unclaim arguments. --json/--toon must appear
 // before the path arguments. At least one path is required.
 func parseSealUnclaimArgs(args []string) (sealUnclaimOptions, []string, error) {
 	var opts sealUnclaimOptions
 	if len(args) > 0 && args[0] == "--json" {
 		opts.JSON = true
 		args = args[1:]
+	} else if len(args) > 0 && args[0] == "--toon" {
+		opts.Toon = true
+		args = args[1:]
 	}
 	if len(args) == 0 {
 		return sealUnclaimOptions{}, nil, exitCodeError(exitUsageError,
-			fmt.Errorf("usage: git kura seal unclaim [--json] <path> [path...]"))
+			fmt.Errorf("usage: git kura seal unclaim [--json] [--toon] <path> [path...]"))
 	}
 	for _, a := range args {
 		if strings.HasPrefix(a, "-") {
 			return sealUnclaimOptions{}, nil, exitCodeError(exitUsageError,
-				fmt.Errorf("usage: git kura seal unclaim [--json] <path> [path...]: unknown option %q", a))
+				fmt.Errorf("usage: git kura seal unclaim [--json] [--toon] <path> [path...]: unknown option %q", a))
 		}
 	}
 	return opts, args, nil
@@ -549,40 +620,46 @@ func runSealDoctor(args []string) error {
 	return cmdSealDoctor(opts)
 }
 
-// parseSealTestArgs parses seal test arguments. --json must appear before the
-// path arguments. At least one path is required.
+// parseSealTestArgs parses seal test arguments. --json/--toon must appear
+// before the path arguments. At least one path is required.
 func parseSealTestArgs(args []string) (sealTestOptions, []string, error) {
 	var opts sealTestOptions
 	if len(args) > 0 && args[0] == "--json" {
 		opts.JSON = true
 		args = args[1:]
+	} else if len(args) > 0 && args[0] == "--toon" {
+		opts.Toon = true
+		args = args[1:]
 	}
 	if len(args) == 0 {
-		return sealTestOptions{}, nil, fmt.Errorf("usage: git kura seal test [--json] <path> [path...]")
+		return sealTestOptions{}, nil, fmt.Errorf("usage: git kura seal test [--json] [--toon] <path> [path...]")
 	}
 	for _, a := range args {
 		if strings.HasPrefix(a, "-") {
-			return sealTestOptions{}, nil, fmt.Errorf("usage: git kura seal test [--json] <path> [path...]: unknown option %q", a)
+			return sealTestOptions{}, nil, fmt.Errorf("usage: git kura seal test [--json] [--toon] <path> [path...]: unknown option %q", a)
 		}
 	}
 	return opts, args, nil
 }
 
-// parseSealDoctorArgs parses seal doctor arguments. --json is the only
-// accepted flag; no positional arguments are accepted.
+// parseSealDoctorArgs parses seal doctor arguments. --json/--toon are the only
+// accepted flags; no positional arguments are accepted.
 func parseSealDoctorArgs(args []string) (sealDoctorOptions, error) {
 	var opts sealDoctorOptions
 	if len(args) > 0 && args[0] == "--json" {
 		opts.JSON = true
+		args = args[1:]
+	} else if len(args) > 0 && args[0] == "--toon" {
+		opts.Toon = true
 		args = args[1:]
 	}
 	if len(args) == 0 {
 		return opts, nil
 	}
 	if strings.HasPrefix(args[0], "-") {
-		return sealDoctorOptions{}, exitCodeError(exitUsageError, fmt.Errorf("usage: git kura seal doctor [--json]: unknown option %q", args[0]))
+		return sealDoctorOptions{}, exitCodeError(exitUsageError, fmt.Errorf("usage: git kura seal doctor [--json] [--toon]: unknown option %q", args[0]))
 	}
-	return sealDoctorOptions{}, exitCodeError(exitUsageError, fmt.Errorf("usage: git kura seal doctor [--json]: unexpected argument %q", args[0]))
+	return sealDoctorOptions{}, exitCodeError(exitUsageError, fmt.Errorf("usage: git kura seal doctor [--json] [--toon]: unexpected argument %q", args[0]))
 }
 
 // parseSealLsArgs parses the argument list for seal ls. --json must appear
@@ -598,9 +675,12 @@ func parseSealLsArgs(args []string) (sealLsOptions, error) {
 	if args[0] == "--json" {
 		opts.JSON = true
 		args = args[1:]
+	} else if args[0] == "--toon" {
+		opts.Toon = true
+		args = args[1:]
 	} else if strings.HasPrefix(args[0], "-") {
 		return sealLsOptions{}, exitCodeError(exitUsageError,
-			fmt.Errorf("usage: git kura seal ls [--json] [key]: unknown option %q", args[0]))
+			fmt.Errorf("usage: git kura seal ls [--json] [--toon] [key]: unknown option %q", args[0]))
 	}
 
 	if len(args) == 0 {
@@ -609,7 +689,7 @@ func parseSealLsArgs(args []string) (sealLsOptions, error) {
 
 	if strings.HasPrefix(args[0], "-") {
 		return sealLsOptions{}, exitCodeError(exitUsageError,
-			fmt.Errorf("usage: git kura seal ls [--json] [key]: unknown option %q", args[0]))
+			fmt.Errorf("usage: git kura seal ls [--json] [--toon] [key]: unknown option %q", args[0]))
 	}
 
 	if err := validateKey(args[0]); err != nil {
@@ -620,7 +700,7 @@ func parseSealLsArgs(args []string) (sealLsOptions, error) {
 
 	if len(args) > 0 {
 		return sealLsOptions{}, exitCodeError(exitUsageError,
-			fmt.Errorf("usage: git kura seal ls [--json] [key]: unexpected argument %q (--json must appear before the key)", args[0]))
+			fmt.Errorf("usage: git kura seal ls [--json] [--toon] [key]: unexpected argument %q (--json/--toon must appear before the key)", args[0]))
 	}
 
 	return opts, nil
@@ -673,22 +753,23 @@ func cmdSealLs(opts sealLsOptions) error {
 	}
 	data := sealLsData{FilterKey: filterKey, Claims: claims}
 
-	if opts.JSON {
+	mode := opts.renderMode()
+	if mode != renderHuman {
 		if err := validateData(sealLsDataSchema, data); err != nil {
 			return err
 		}
-		return emitResult(renderJSON, Result{Command: commandSealLs, Data: data})
 	}
-	return emitResult(renderHuman, Result{Command: commandSealLs, Data: data})
+	return emitResult(mode, Result{Command: commandSealLs, Data: data})
 }
 
-// sealLsFail routes a seal ls failure to the right output. JSON requests
+// sealLsFail routes a seal ls failure to the right output. JSON/TOON requests
 // render an ok:false envelope on stdout; plain requests keep existing behavior.
 func sealLsFail(opts sealLsOptions, err error) error {
-	if !opts.JSON {
+	mode := opts.renderMode()
+	if mode == renderHuman {
 		return err
 	}
-	return emitError(renderJSON, toCommandError(commandSealLs, err))
+	return emitError(mode, toCommandError(commandSealLs, err))
 }
 
 // cmdSealDoctor validates the whole path seal store for the current Git
@@ -734,11 +815,12 @@ func cmdSealDoctor(opts sealDoctorOptions) error {
 		Findings: findings,
 	}
 
-	if opts.JSON {
+	mode := opts.renderMode()
+	if mode != renderHuman {
 		if err := validateData(sealDoctorDataSchema, data); err != nil {
 			return err
 		}
-		if err := emitResult(renderJSON, Result{Command: commandSealDoctor, Data: data}); err != nil {
+		if err := emitResult(mode, Result{Command: commandSealDoctor, Data: data}); err != nil {
 			return err
 		}
 		if !data.Healthy {
@@ -747,7 +829,7 @@ func cmdSealDoctor(opts sealDoctorOptions) error {
 		return nil
 	}
 
-	// Human mode: route through the framework so JSON and human render the same data.
+	// Human mode: route through the framework so JSON/TOON and human render the same data.
 	// Unhealthy findings go to stdout as a business result (ok:true, healthy:false).
 	if err := emitResult(renderHuman, Result{Command: commandSealDoctor, Data: data}); err != nil {
 		return err
@@ -758,12 +840,13 @@ func cmdSealDoctor(opts sealDoctorOptions) error {
 	return nil
 }
 
-// sealDoctorFail routes a seal doctor failure to the right output. JSON
+// sealDoctorFail routes a seal doctor failure to the right output. JSON/TOON
 // requests render an ok:false envelope on stdout; plain requests keep the
 // existing error behavior.
 func sealDoctorFail(opts sealDoctorOptions, err error) error {
-	if !opts.JSON {
+	mode := opts.renderMode()
+	if mode == renderHuman {
 		return err
 	}
-	return emitError(renderJSON, toCommandError(commandSealDoctor, err))
+	return emitError(mode, toCommandError(commandSealDoctor, err))
 }

@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
-	toon "github.com/toon-format/toon-go"
 	"github.com/tooppoo/git-kura/internal/gitutil"
 	"github.com/tooppoo/git-kura/internal/worktree"
 )
@@ -100,8 +99,9 @@ Create a git worktree for <key> on a new branch <key>.
 Flags:
   --dry-run       Show the worktree that would be created, without creating it
   --json          Print the result as a JSON envelope
+  --toon          Print the result as a TOON envelope (experimental; AI-friendly)
 
-Without --json, open prints the worktree path and what was created. A dry run never
+Without --json/--toon, open prints the worktree path and what was created. A dry run never
 creates the worktree, branch, or metadata; pre-creation conflicts are reported
 as warnings while the command still succeeds.`
 
@@ -112,6 +112,7 @@ seals that <key> holds in the repository-wide seal store.
 
 Flags:
   --json   Print structured output as a JSON envelope
+  --toon   Print structured output as a TOON envelope (experimental; AI-friendly)
 
 close takes the seal store lock before any cleanup, so it can fail with
 seal-lock-timeout (exit code 5) when the lock is held, leaving everything
@@ -120,12 +121,13 @@ unchanged.
 For the full cleanup order, paths.json handling, and recovery behavior, see
 https://github.com/tooppoo/git-kura/blob/main/docs/commands.md`
 
-const lsHelp = `Usage: git kura ls [--json]
+const lsHelp = `Usage: git kura ls [--json] [--toon]
 
 List all currently open worktrees, one key per line.
 
 Flags:
-  --json   Print structured output as a JSON envelope`
+  --json   Print structured output as a JSON envelope
+  --toon   Print structured output as a TOON envelope (experimental; AI-friendly)`
 
 // exitError carries a specific exit code to be used by main.
 type exitError struct {
@@ -282,14 +284,47 @@ type getOptions struct {
 type openOptions struct {
 	DryRun bool
 	JSON   bool
+	Toon   bool
+}
+
+func (o openOptions) renderMode() renderMode {
+	if o.Toon {
+		return renderTOON
+	}
+	if o.JSON {
+		return renderJSON
+	}
+	return renderHuman
 }
 
 type closeOptions struct {
 	JSON bool
+	Toon bool
+}
+
+func (o closeOptions) renderMode() renderMode {
+	if o.Toon {
+		return renderTOON
+	}
+	if o.JSON {
+		return renderJSON
+	}
+	return renderHuman
 }
 
 type lsOptions struct {
 	JSON bool
+	Toon bool
+}
+
+func (o lsOptions) renderMode() renderMode {
+	if o.Toon {
+		return renderTOON
+	}
+	if o.JSON {
+		return renderJSON
+	}
+	return renderHuman
 }
 
 // lsData is the structured success payload for ls --json.
@@ -379,7 +414,7 @@ func parseGetArgs(args []string) (string, getOptions, error) {
 
 func parseOpenArgs(args []string) (string, openOptions, error) {
 	if len(args) == 0 {
-		return "", openOptions{}, fmt.Errorf("usage: git kura open <key> [--dry-run] [--json]")
+		return "", openOptions{}, fmt.Errorf("usage: git kura open <key> [--dry-run] [--json] [--toon]")
 	}
 
 	key := args[0]
@@ -394,17 +429,23 @@ func parseOpenArgs(args []string) (string, openOptions, error) {
 			opts.DryRun = true
 		case "--json":
 			opts.JSON = true
+		case "--toon":
+			opts.Toon = true
 		default:
-			return "", openOptions{}, fmt.Errorf("usage: git kura open <key> [--dry-run] [--json]: unexpected argument %q", flag)
+			return "", openOptions{}, fmt.Errorf("usage: git kura open <key> [--dry-run] [--json] [--toon]: unexpected argument %q", flag)
 		}
 	}
 
+	if opts.JSON && opts.Toon {
+		return "", openOptions{}, exitCodeError(exitUsageError,
+			fmt.Errorf("usage: git kura open <key> [--dry-run] [--json] [--toon]: --json and --toon are mutually exclusive"))
+	}
 	return key, opts, nil
 }
 
 func parseCloseArgs(args []string) (string, closeOptions, error) {
 	if len(args) == 0 {
-		return "", closeOptions{}, fmt.Errorf("usage: git kura close <key> [--json]")
+		return "", closeOptions{}, fmt.Errorf("usage: git kura close <key> [--json] [--toon]")
 	}
 
 	key := args[0]
@@ -417,12 +458,18 @@ func parseCloseArgs(args []string) (string, closeOptions, error) {
 		switch flag {
 		case "--json":
 			opts.JSON = true
+		case "--toon":
+			opts.Toon = true
 		default:
 			return "", closeOptions{}, exitCodeError(exitUsageError,
-				fmt.Errorf("usage: git kura close <key> [--json]: unexpected argument %q", flag))
+				fmt.Errorf("usage: git kura close <key> [--json] [--toon]: unexpected argument %q", flag))
 		}
 	}
 
+	if opts.JSON && opts.Toon {
+		return "", closeOptions{}, exitCodeError(exitUsageError,
+			fmt.Errorf("usage: git kura close <key> [--json] [--toon]: --json and --toon are mutually exclusive"))
+	}
 	return key, opts, nil
 }
 
@@ -446,10 +493,10 @@ func parseKeyOnlyArgs(command string, args []string) (string, error) {
 // Command execution
 
 // cmdGet resolves worktree information for key. Scalar output (--path/--branch/
-// --root) and TOON output keep their existing bare-value behavior and report
-// failures as plain errors. JSON output (--json/--format json) is routed through
-// the output framework: success becomes a common envelope and an execution-time
-// failure becomes an ok:false envelope, both on stdout.
+// --root) keeps its existing bare-value behavior. JSON output (--json/--format
+// json) and TOON output (--toon/--format toon) are routed through the output
+// framework: success becomes a common envelope and an execution-time failure
+// becomes an ok:false envelope, both on stdout.
 func cmdGet(key string, opts getOptions) error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
@@ -511,20 +558,27 @@ func cmdGet(key string, opts getOptions) error {
 		}
 		return emitResult(renderJSON, Result{Command: commandGet, Data: data})
 	case outputTOON:
-		return printTOON(data)
+		if err := validateData(getDataSchema, data); err != nil {
+			return err
+		}
+		return emitResult(renderTOON, Result{Command: commandGet, Data: data})
 	}
 
 	return nil
 }
 
-// getFail routes a get failure to the right output. JSON requests render an
-// ok:false envelope on stdout (and return the exit-code-only sentinel); scalar
-// and TOON requests keep the existing plain-error behavior.
+// getFail routes a get failure to the right output. JSON and TOON requests
+// render an ok:false envelope on stdout (and return the exit-code-only
+// sentinel); scalar requests keep the existing plain-error behavior.
 func getFail(opts getOptions, err error) error {
-	if opts.OutputMode != outputJSON {
+	if opts.OutputMode != outputJSON && opts.OutputMode != outputTOON {
 		return err
 	}
-	return emitError(renderJSON, toCommandError(commandGet, err))
+	mode := renderJSON
+	if opts.OutputMode == outputTOON {
+		mode = renderTOON
+	}
+	return emitError(mode, toCommandError(commandGet, err))
 }
 
 func cmdOpen(key string, opts openOptions) error {
@@ -589,12 +643,11 @@ func cmdOpen(key string, opts openOptions) error {
 		CreatedBranch:   &createdBranch,
 		CreatedMetadata: &createdMetadata,
 	}
-	mode := renderHuman
-	if opts.JSON {
+	mode := opts.renderMode()
+	if mode != renderHuman {
 		if err := validateData(openDataSchema, data); err != nil {
 			return err
 		}
-		mode = renderJSON
 	}
 	return emitResult(mode, Result{Command: commandOpen, Data: data})
 }
@@ -628,21 +681,18 @@ func cmdOpenDryRun(opts openOptions, repoRoot, key, path, branch string) error {
 
 	warnings := dryRunConflictWarnings(repoRoot, key, path, branch)
 
-	mode := renderHuman
-	if opts.JSON {
-		mode = renderJSON
-	}
-	return emitResult(mode, Result{Command: commandOpen, Data: data, Warnings: warnings})
+	return emitResult(opts.renderMode(), Result{Command: commandOpen, Data: data, Warnings: warnings})
 }
 
-// openFail routes an open failure to the right output. JSON requests render an
-// ok:false envelope on stdout; every other open invocation keeps the existing
-// plain-error behavior.
+// openFail routes an open failure to the right output. JSON/TOON requests
+// render an ok:false envelope on stdout; every other open invocation keeps the
+// existing plain-error behavior.
 func openFail(opts openOptions, err error) error {
-	if !opts.JSON {
+	mode := opts.renderMode()
+	if mode == renderHuman {
 		return err
 	}
-	return emitError(renderJSON, toCommandError(commandOpen, err))
+	return emitError(mode, toCommandError(commandOpen, err))
 }
 
 // dryRunConflict is one pre-creation collision found by open --dry-run. Type is
@@ -772,24 +822,21 @@ func validateData(schema *jsonschema.Schema, data any) error {
 	return nil
 }
 
-func printTOON(data worktreeJSON) error {
-	out, err := toon.MarshalString(data)
-	if err != nil {
-		return fmt.Errorf("internal: toon encoding failed: %w", err)
-	}
-	fmt.Println(out)
-	return nil
-}
-
 func parseLsArgs(args []string) (lsOptions, error) {
 	var opts lsOptions
 	for _, a := range args {
 		switch a {
 		case "--json":
 			opts.JSON = true
+		case "--toon":
+			opts.Toon = true
 		default:
-			return lsOptions{}, fmt.Errorf("usage: git kura ls [--json]: unexpected argument %q", a)
+			return lsOptions{}, fmt.Errorf("usage: git kura ls [--json] [--toon]: unexpected argument %q", a)
 		}
+	}
+	if opts.JSON && opts.Toon {
+		return lsOptions{}, exitCodeError(exitUsageError,
+			fmt.Errorf("usage: git kura ls [--json] [--toon]: --json and --toon are mutually exclusive"))
 	}
 	return opts, nil
 }
@@ -833,22 +880,23 @@ func cmdLs(opts lsOptions) error {
 		data.Keys = []string{}
 	}
 
-	if opts.JSON {
+	mode := opts.renderMode()
+	if mode != renderHuman {
 		if err := validateData(lsDataSchema, data); err != nil {
 			return err
 		}
-		return emitResult(renderJSON, Result{Command: commandLs, Data: data})
 	}
-	return emitResult(renderHuman, Result{Command: commandLs, Data: data})
+	return emitResult(mode, Result{Command: commandLs, Data: data})
 }
 
-// lsFail routes an ls failure to the right output. JSON requests render an
+// lsFail routes an ls failure to the right output. JSON/TOON requests render an
 // ok:false envelope on stdout; plain requests keep the existing error behavior.
 func lsFail(opts lsOptions, err error) error {
-	if !opts.JSON {
+	mode := opts.renderMode()
+	if mode == renderHuman {
 		return err
 	}
-	return emitError(renderJSON, toCommandError(commandLs, err))
+	return emitError(mode, toCommandError(commandLs, err))
 }
 
 // cmdClose tears down the worktree for key and releases every path seal that
@@ -971,21 +1019,21 @@ func cmdClose(key string, opts closeOptions) error {
 		partial.RemovedMetadata = true
 	}
 
-	mode := renderHuman
-	if opts.JSON {
+	mode := opts.renderMode()
+	if mode != renderHuman {
 		if err := validateData(closeDataSchema, *partial); err != nil {
 			return err
 		}
-		mode = renderJSON
 	}
 	return emitResult(mode, Result{Command: commandClose, Data: *partial})
 }
 
-// closeFail routes a close failure to the right output. JSON requests render an
-// ok:false envelope on stdout with partial-effect details; non-JSON requests
-// keep the existing plain-error behavior.
+// closeFail routes a close failure to the right output. JSON/TOON requests
+// render an ok:false envelope on stdout with partial-effect details; non-JSON/
+// TOON requests keep the existing plain-error behavior.
 func closeFail(opts closeOptions, partial *closeDataJSON, phase string, err error) error {
-	if !opts.JSON {
+	mode := opts.renderMode()
+	if mode == renderHuman {
 		return err
 	}
 	var details *closeErrorDetails
@@ -996,13 +1044,14 @@ func closeFail(opts closeOptions, partial *closeDataJSON, phase string, err erro
 	}
 	cerr := toCommandError(commandClose, err)
 	cerr.Details = details
-	return emitError(renderJSON, cerr)
+	return emitError(mode, cerr)
 }
 
 // closeStoreFail routes a close store-level failure (read-store or validate-store)
 // to the right output, including error.details.storeError as required by Issue #63.
 func closeStoreFail(opts closeOptions, partial *closeDataJSON, phase string, storeFile string, err error) error {
-	if !opts.JSON {
+	mode := opts.renderMode()
+	if mode == renderHuman {
 		return err
 	}
 	statusMap := map[string]string{
@@ -1018,7 +1067,7 @@ func closeStoreFail(opts closeOptions, partial *closeDataJSON, phase string, sto
 	}
 	cerr := toCommandError(commandClose, err)
 	cerr.Details = details
-	return emitError(renderJSON, cerr)
+	return emitError(mode, cerr)
 }
 
 type worktreeJSON struct {

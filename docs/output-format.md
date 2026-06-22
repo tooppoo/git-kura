@@ -78,34 +78,41 @@ JSON output uses the common output envelope. The worktree metadata is nested und
 
 A valid `get --json` request that fails at execution time returns an `ok: false` envelope on stdout with the failure under `error`, while preserving the existing exit code.
 
-Scalar output (`--path` / `--branch` / `--root`) is not wrapped in the envelope and must not be combined with `--json` / `--format json`; doing so is a usage error (exit code 2).
+Scalar output (`--path` / `--branch` / `--root`) is not wrapped in the envelope and must not be combined with `--json` / `--format json` / `--toon` / `--format toon`; doing so is a usage error (exit code 2).
 
 `git kura open <key> --dry-run --json` uses the common envelope with the planned worktree under `data`, validated by its own command-specific schema. In dry-run data, `baseBranch` is the current branch and both `exists` and `dirty` are `false`. Conditions that would collide at real creation time (an existing worktree path, branch, or metadata) are reported in `warnings[]` under code `open-dry-run-conflict`, with the colliding items in `details.conflicts`; the dry run still succeeds with exit code 0. On its own (without `--json`), `git kura open <key> --dry-run` prints human-readable output instead of an envelope.
 
 ### TOON (`--toon` / `--format toon`)
 
-[TOON](https://github.com/toon-format/toon) is a prompt-friendly, AI-oriented format generated from the same metadata model as JSON.
+[TOON](https://github.com/toon-format/toon) is a prompt-friendly, AI-oriented format generated from the same envelope as JSON. The top-level structure mirrors the JSON envelope (`ok`, `command`, `schemaVersion`, `data`, `warnings`, and on failure `error`) but is formatted for readability in LLM prompts.
 
 ```sh
 git kura get 51 --toon
 git kura get 51 --format toon
 ```
 
-Example output:
+Example output (success):
 
 ```toon
+ok: true
+command: get
 schemaVersion: 1
-key: fizz
-kind: worktree
-branch: fizz
-worktreePath: /workspaces/git-kura/.git/kura/worktrees/fizz
-repositoryRoot: /workspaces/git-kura
-baseBranch: main
-exists: true
-dirty: false
+data:
+  schemaVersion: 1
+  key: fizz
+  kind: worktree
+  branch: fizz
+  worktreePath: /workspaces/git-kura/.git/kura/worktrees/fizz
+  repositoryRoot: /workspaces/git-kura
+  baseBranch: main
+  exists: true
+  dirty: false
+warnings[0]:
 ```
 
-Use TOON when passing workspace context to an LLM prompt or coding agent. JSON remains the compatibility contract for external tools; TOON is not a replacement.
+TOON output is written to **stdout** on both success and failure, matching JSON behaviour. The whitespace, line order, and field rendering are not part of the stable contract — only the JSON envelope schema and the JSON command-data schema are stable. Use TOON when passing workspace context to an LLM prompt or coding agent; use `--json` for scripts and external tooling.
+
+All commands that support `--json` also support `--toon`. The two flags are mutually exclusive; combining them is a usage error.
 
 ### `git kura close`
 
