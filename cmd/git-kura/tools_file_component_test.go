@@ -4,12 +4,14 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/tooppoo/git-kura/internal/tools"
 )
 
 func TestToolsInstallCreatesThenIsIdempotent(t *testing.T) {
 	repo := toolsTestRepo(t)
 	fetcher, comp := fixtureAssets(t, []byte("hello tool\n"))
-	deps := toolsDeps{registry: newToolsRegistry(comp), version: fixtureVersion, fetcher: fetcher}
+	deps := toolsDeps{registry: mustToolsRegistry(t, comp), version: fixtureVersion, fetcher: fetcher}
 
 	out, err := runToolsCLI(t, repo, deps, "install", "alpha")
 	if err != nil {
@@ -38,7 +40,7 @@ func TestToolsInstallCreatesThenIsIdempotent(t *testing.T) {
 func TestToolsInstallUpdatesAcrossVersions(t *testing.T) {
 	repo := toolsTestRepo(t)
 	fetcher, comp := fixtureAssetsForVersion(t, "1.2.3", []byte("v1\n"))
-	deps := toolsDeps{registry: newToolsRegistry(comp), version: "1.2.3", fetcher: fetcher}
+	deps := toolsDeps{registry: mustToolsRegistry(t, comp), version: "1.2.3", fetcher: fetcher}
 
 	if _, err := runToolsCLI(t, repo, deps, "install", "alpha"); err != nil {
 		t.Fatalf("install 1.2.3: %v", err)
@@ -48,7 +50,7 @@ func TestToolsInstallUpdatesAcrossVersions(t *testing.T) {
 	// directory, so it is a legitimate update rather than a same-version release
 	// inconsistency.
 	fetcher2, comp2 := fixtureAssetsForVersion(t, "1.2.4", []byte("v2\n"))
-	deps2 := toolsDeps{registry: newToolsRegistry(comp2), version: "1.2.4", fetcher: fetcher2}
+	deps2 := toolsDeps{registry: mustToolsRegistry(t, comp2), version: "1.2.4", fetcher: fetcher2}
 	out, err := runToolsCLI(t, repo, deps2, "install", "alpha")
 	if err != nil {
 		t.Fatalf("install 1.2.4: %v", err)
@@ -65,7 +67,7 @@ func TestToolsInstallUpdatesAcrossVersions(t *testing.T) {
 func TestToolsInstallFailsOnSameVersionCacheInconsistency(t *testing.T) {
 	repo := toolsTestRepo(t)
 	fetcher, comp := fixtureAssets(t, []byte("v1\n"))
-	deps := toolsDeps{registry: newToolsRegistry(comp), version: fixtureVersion, fetcher: fetcher}
+	deps := toolsDeps{registry: mustToolsRegistry(t, comp), version: fixtureVersion, fetcher: fetcher}
 	if _, err := runToolsCLI(t, repo, deps, "install", "alpha"); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
@@ -73,9 +75,9 @@ func TestToolsInstallFailsOnSameVersionCacheInconsistency(t *testing.T) {
 	// The same version now advertises a different archive checksum: a release
 	// asset must never change, so install must fail rather than refresh or use
 	// the cache.
-	tampered := makeSidecar(t, fixtureVersion, fixtureArchiveName, checksumAlgorithmSHA256, []byte("different release bytes"))
+	tampered := makeSidecar(t, fixtureVersion, fixtureArchiveName, tools.ChecksumAlgorithmSHA256, []byte("different release bytes"))
 	badFetcher := &fakeFetcher{sidecar: tampered, archive: fetcher.archive}
-	deps2 := toolsDeps{registry: newToolsRegistry(comp), version: fixtureVersion, fetcher: badFetcher}
+	deps2 := toolsDeps{registry: mustToolsRegistry(t, comp), version: fixtureVersion, fetcher: badFetcher}
 
 	out, err := runToolsCLI(t, repo, deps2, "install", "alpha")
 	requireToolsExit(t, err, exitGeneralError)
@@ -96,7 +98,7 @@ func TestToolsInstallFailsOnSameVersionCacheInconsistency(t *testing.T) {
 func TestToolsUninstallRemovesManagedFile(t *testing.T) {
 	repo := toolsTestRepo(t)
 	fetcher, comp := fixtureAssets(t, []byte("x\n"))
-	deps := toolsDeps{registry: newToolsRegistry(comp), version: fixtureVersion, fetcher: fetcher}
+	deps := toolsDeps{registry: mustToolsRegistry(t, comp), version: fixtureVersion, fetcher: fetcher}
 
 	if _, err := runToolsCLI(t, repo, deps, "install", "alpha"); err != nil {
 		t.Fatalf("install: %v", err)
@@ -123,7 +125,7 @@ func TestToolsUninstallRemovesManagedFile(t *testing.T) {
 func TestToolsUninstallSkipsUserModifiedFile(t *testing.T) {
 	repo := toolsTestRepo(t)
 	fetcher, comp := fixtureAssets(t, []byte("original\n"))
-	deps := toolsDeps{registry: newToolsRegistry(comp), version: fixtureVersion, fetcher: fetcher}
+	deps := toolsDeps{registry: mustToolsRegistry(t, comp), version: fixtureVersion, fetcher: fetcher}
 
 	if _, err := runToolsCLI(t, repo, deps, "install", "alpha"); err != nil {
 		t.Fatalf("install: %v", err)
@@ -148,7 +150,7 @@ func TestToolsConfigManagedUninstall(t *testing.T) {
 	repo := toolsTestRepo(t)
 	fetcher, _ := fixtureAssets(t, []byte("ignored\n"))
 	cfg := &configFixture{componentID: "cfg", configKey: "kura.fixtureValue", value: "managed"}
-	deps := toolsDeps{registry: newToolsRegistry(cfg), version: fixtureVersion, fetcher: fetcher}
+	deps := toolsDeps{registry: mustToolsRegistry(t, cfg), version: fixtureVersion, fetcher: fetcher}
 
 	if _, err := runToolsCLI(t, repo, deps, "install", "cfg"); err != nil {
 		t.Fatalf("install cfg: %v", err)
@@ -157,8 +159,8 @@ func TestToolsConfigManagedUninstall(t *testing.T) {
 	store := requireJSONFile(t, installedJSONPath(repo))
 	comps := store["components"].(map[string]any)
 	entry := comps["cfg"].(map[string]any)
-	if entry["managedMode"] != managedModeConfig {
-		t.Fatalf("managedMode = %v, want %q", entry["managedMode"], managedModeConfig)
+	if entry["managedMode"] != tools.ManagedModeConfig {
+		t.Fatalf("managedMode = %v, want %q", entry["managedMode"], tools.ManagedModeConfig)
 	}
 
 	// A user changes the value: uninstall must not revert it.
@@ -179,7 +181,7 @@ func TestToolsMultipleComponentsContinueAfterFailure(t *testing.T) {
 	repo := toolsTestRepo(t)
 	fetcher, comp := fixtureAssets(t, []byte("ok\n"))
 	fail := &failingFixture{componentID: "boom"}
-	deps := toolsDeps{registry: newToolsRegistry(fail, comp), version: fixtureVersion, fetcher: fetcher}
+	deps := toolsDeps{registry: mustToolsRegistry(t, fail, comp), version: fixtureVersion, fetcher: fetcher}
 
 	out, err := runToolsCLI(t, repo, deps, "install", "boom", "alpha")
 	// At least one failure means non-zero exit.
@@ -194,7 +196,7 @@ func TestToolsMultipleComponentsContinueAfterFailure(t *testing.T) {
 func TestToolsInstallFailsOnNonReleaseBinary(t *testing.T) {
 	repo := toolsTestRepo(t)
 	fetcher, comp := fixtureAssets(t, []byte("x\n"))
-	deps := toolsDeps{registry: newToolsRegistry(comp), version: "dev", fetcher: fetcher}
+	deps := toolsDeps{registry: mustToolsRegistry(t, comp), version: "dev", fetcher: fetcher}
 
 	out, err := runToolsCLI(t, repo, deps, "install", "alpha")
 	requireToolsExit(t, err, exitGeneralError)

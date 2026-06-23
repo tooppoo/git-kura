@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/cmd/git-kura/schema/pre_commit_meta.schema.json",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/internal/tools/schema/pre_commit_meta.schema.json",
   "title": "git kura pre-commit component metadata",
   "description": "Schema for the componentMetadata blob of the pre-commit tool component, stored in the tools metadata store.",
   "type": "object",

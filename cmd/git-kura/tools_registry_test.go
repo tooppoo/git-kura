@@ -3,44 +3,15 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/tooppoo/git-kura/internal/tools"
 )
-
-func TestToolsProductionRegistryRecognizesComponents(t *testing.T) {
-	reg := productionToolsRegistry()
-	got := reg.ids()
-	want := []string{"pre-commit", "claude-skill", "codex-skill"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("production registry IDs = %v, want %v", got, want)
-	}
-	for _, id := range want {
-		if _, ok := reg.get(id); !ok {
-			t.Fatalf("component %q not recognized", id)
-		}
-	}
-	// No dummy/test components must leak into the production registry.
-	for _, id := range got {
-		if strings.Contains(id, "dummy") || strings.Contains(id, "test") || id == "alpha" {
-			t.Fatalf("unexpected component %q in production registry", id)
-		}
-	}
-}
-
-func TestNewToolsRegistryRejectsDuplicateID(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("duplicate component ID should panic")
-		}
-	}()
-	newToolsRegistry(&failingFixture{componentID: "dup"}, &failingFixture{componentID: "dup"})
-}
 
 func TestToolsPendingComponentInstallAndUninstall(t *testing.T) {
 	repo := toolsTestRepo(t)
 	fetcher, _ := fixtureAssets(t, []byte("x\n"))
-	// Use a dedicated pending component directly rather than the production
-	// registry, since all production components are now implemented.
-	pending := newPendingComponent("future-tool", "https://github.com/tooppoo/git-kura/issues/999")
-	deps := toolsDeps{registry: newToolsRegistry(pending), version: fixtureVersion, fetcher: fetcher}
+	pending := tools.PendingComponent{ComponentID: "future-tool", TrackingURL: "https://github.com/tooppoo/git-kura/issues/999"}
+	deps := toolsDeps{registry: mustToolsRegistry(t, pending), version: fixtureVersion, fetcher: fetcher}
 
 	// install of a pending component resolves and verifies the asset, then fails
 	// with a tracking-issue reason; the command exits non-zero and writes no

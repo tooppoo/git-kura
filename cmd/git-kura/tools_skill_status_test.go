@@ -5,13 +5,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tooppoo/git-kura/internal/tools"
 )
 
 func TestSkillStatusNotInstalled(t *testing.T) {
 	repo := toolsTestRepo(t)
 	deps := skillDeps(t, []byte("c"), []byte("co"))
 
-	out, err := runToolsCLI(t, repo, deps, "status", claudeSkillComponentID)
+	out, err := runToolsCLI(t, repo, deps, "status", tools.ClaudeSkillComponentID)
 	if err != nil {
 		t.Fatalf("status: %v\n%s", err, out)
 	}
@@ -31,7 +33,7 @@ func TestSkillStatusUnmanagedFileExists(t *testing.T) {
 	}
 	writeFile(t, dest, "user skill")
 
-	out, err := runToolsCLI(t, repo, deps, "status", claudeSkillComponentID)
+	out, err := runToolsCLI(t, repo, deps, "status", tools.ClaudeSkillComponentID)
 	if err != nil {
 		t.Fatalf("status: %v\n%s", err, out)
 	}
@@ -48,11 +50,11 @@ func TestSkillStatusInstalled(t *testing.T) {
 	content := []byte("skill content")
 	deps := skillDeps(t, content, []byte("codex"))
 
-	if _, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID); err != nil {
+	if _, err := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
-	out, err := runToolsCLI(t, repo, deps, "status", claudeSkillComponentID)
+	out, err := runToolsCLI(t, repo, deps, "status", tools.ClaudeSkillComponentID)
 	if err != nil {
 		t.Fatalf("status: %v\n%s", err, out)
 	}
@@ -69,14 +71,14 @@ func TestSkillStatusAfterUserModification(t *testing.T) {
 	content := []byte("skill content")
 	deps := skillDeps(t, content, []byte("codex"))
 
-	if _, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID); err != nil {
+	if _, err := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
 	// Modify the installed file
 	appendFile(t, claudeSkillDest(repo), "\nuser addition")
 
-	out, err := runToolsCLI(t, repo, deps, "status", claudeSkillComponentID)
+	out, err := runToolsCLI(t, repo, deps, "status", tools.ClaudeSkillComponentID)
 	if err != nil {
 		t.Fatalf("status: %v\n%s", err, out)
 	}
@@ -93,7 +95,7 @@ func TestSkillStatusInstalledButFileMissing(t *testing.T) {
 	content := []byte("skill content")
 	deps := skillDeps(t, content, []byte("codex"))
 
-	if _, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID); err != nil {
+	if _, err := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -101,7 +103,7 @@ func TestSkillStatusInstalledButFileMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := runToolsCLI(t, repo, deps, "status", claudeSkillComponentID)
+	out, err := runToolsCLI(t, repo, deps, "status", tools.ClaudeSkillComponentID)
 	if err != nil {
 		t.Fatalf("status: %v\n%s", err, out)
 	}
@@ -114,12 +116,12 @@ func TestSkillStatusInstalledButFileMissing(t *testing.T) {
 }
 
 func TestPendingComponentStatus(t *testing.T) {
-	c := newPendingComponent("future-tool", "https://github.com/tooppoo/git-kura/issues/999")
-	out := c.status(toolsContext{})
-	if out.result.Action != actionNotInstalled {
-		t.Fatalf("pending status action = %q, want %q", out.result.Action, actionNotInstalled)
+	c := tools.PendingComponent{ComponentID: "future-tool", TrackingURL: "https://github.com/tooppoo/git-kura/issues/999"}
+	out := c.Status(tools.Context{})
+	if out.Result.Action != tools.ActionNotInstalled {
+		t.Fatalf("pending status action = %q, want %q", out.Result.Action, tools.ActionNotInstalled)
 	}
-	if !strings.Contains(out.result.Reason, "future-tool") && !strings.Contains(out.result.Reason, "not yet") {
-		t.Fatalf("pending status reason = %q, want it to mention the component or pending state", out.result.Reason)
+	if !strings.Contains(out.Result.Reason, "future-tool") && !strings.Contains(out.Result.Reason, "not yet") {
+		t.Fatalf("pending status reason = %q, want it to mention the component or pending state", out.Result.Reason)
 	}
 }

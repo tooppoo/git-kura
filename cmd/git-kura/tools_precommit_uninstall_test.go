@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tooppoo/git-kura/internal/tools"
 )
 
 func TestPreCommitUninstallRestoresUnset(t *testing.T) {
@@ -78,23 +80,19 @@ func TestPreCommitUninstallLeavesUserChangedHooksPath(t *testing.T) {
 func TestPreCommitUninstallCleansUpPendingState(t *testing.T) {
 	repo := toolsTestRepo(t)
 	commonDir := filepath.Join(repo, ".git")
-	hooksDir := preCommitHooksDir(commonDir)
+	hooksDir := tools.PreCommitHooksDir(commonDir)
 	// Simulate an interrupted install: pending metadata, managed wrapper present,
 	// and core.hooksPath already switched to the managed dir.
-	if err := writeManagedWrapper(filepath.Join(hooksDir, "pre-commit")); err != nil {
-		t.Fatal(err)
-	}
+	writeWrapperForTest(t, filepath.Join(hooksDir, "pre-commit"))
 	git(t, repo, "config", "--local", "core.hooksPath", hooksDir)
-	entry := toolsMetadataEntry{
-		Component:         preCommitComponentID,
-		ManagedMode:       managedModeConfig,
-		ComponentMetadata: preCommitMeta{InstallState: preCommitStatePending, PreviousLocalHooksPathState: "unset"}.toMap(),
+	entry := tools.MetadataEntry{
+		Component:         tools.PreCommitComponentID,
+		ManagedMode:       tools.ManagedModeConfig,
+		ComponentMetadata: tools.PreCommitMeta{InstallState: tools.PreCommitStatePending, PreviousLocalHooksPathState: "unset"}.ToMap(),
 		CreatedAt:         time.Now().UTC().Format(time.RFC3339),
 		UpdatedAt:         time.Now().UTC().Format(time.RFC3339),
 	}
-	if err := persistPreCommitEntry(repo, entry); err != nil {
-		t.Fatal(err)
-	}
+	persistToolsEntry(t, repo, entry)
 
 	deps := preCommitDeps(t)
 	out, err := runToolsCLI(t, repo, deps, "uninstall", "pre-commit")
@@ -104,7 +102,7 @@ func TestPreCommitUninstallCleansUpPendingState(t *testing.T) {
 	if _, ok := gitConfigLocal(t, repo, "core.hooksPath"); ok {
 		t.Fatal("core.hooksPath should be unset after cleaning up a pending install")
 	}
-	if _, err := os.Stat(preCommitManagedRoot(commonDir)); !os.IsNotExist(err) {
+	if _, err := os.Stat(tools.PreCommitManagedRoot(commonDir)); !os.IsNotExist(err) {
 		t.Fatalf("managed hook tree should be removed: %v", err)
 	}
 }
@@ -129,7 +127,7 @@ func TestPreCommitUninstallRestoresLocalDespiteHigherPrecedence(t *testing.T) {
 	if v, ok := gitConfigLocal(t, repo, "core.hooksPath"); ok {
 		t.Fatalf("repository-local core.hooksPath should be restored to unset, got %q", v)
 	}
-	if _, err := os.Stat(preCommitManagedRoot(filepath.Join(repo, ".git"))); !os.IsNotExist(err) {
+	if _, err := os.Stat(tools.PreCommitManagedRoot(filepath.Join(repo, ".git"))); !os.IsNotExist(err) {
 		t.Fatalf("managed hook tree should be removed: %v", err)
 	}
 }
@@ -154,7 +152,7 @@ func TestPreCommitUninstallDoesNotPersistPreviousGlobalAsLocal(t *testing.T) {
 	}
 	// The effective previous hooks path (from global) is still captured for
 	// chaining, even though the local scope was unset.
-	if meta.PreviousHooksPathState != "set" || !samePathSafe(meta.PreviousHooksPathValue, globalHooks) {
+	if meta.PreviousHooksPathState != "set" || !tools.SamePathSafe(meta.PreviousHooksPathValue, globalHooks) {
 		t.Fatalf("previous effective hooks path = %q/%q, want set/%q", meta.PreviousHooksPathState, meta.PreviousHooksPathValue, globalHooks)
 	}
 
@@ -177,32 +175,5 @@ func TestPreCommitUninstallNotInstalled(t *testing.T) {
 	}
 	if !strings.Contains(out, "not-installed") {
 		t.Fatalf("expected not-installed:\n%s", out)
-	}
-}
-
-func TestDeletePreCommitEntry(t *testing.T) {
-	repo := toolsTestRepo(t)
-	entry := toolsMetadataEntry{
-		Component:         preCommitComponentID,
-		ManagedMode:       managedModeConfig,
-		ComponentMetadata: preCommitMeta{InstallState: preCommitStatePending}.toMap(),
-		CreatedAt:         time.Now().UTC().Format(time.RFC3339),
-		UpdatedAt:         time.Now().UTC().Format(time.RFC3339),
-	}
-	if err := persistPreCommitEntry(repo, entry); err != nil {
-		t.Fatalf("persist: %v", err)
-	}
-	if _, ok := readPreCommitMeta(t, repo); !ok {
-		t.Fatal("entry should be present after persist")
-	}
-	if err := deletePreCommitEntry(repo); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-	if _, ok := readPreCommitMeta(t, repo); ok {
-		t.Fatal("entry should be gone after delete")
-	}
-	// Deleting an absent entry is a no-op.
-	if err := deletePreCommitEntry(repo); err != nil {
-		t.Fatalf("delete absent: %v", err)
 	}
 }
