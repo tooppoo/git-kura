@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/tooppoo/git-kura/internal/tools"
 )
 
 func runHook(t *testing.T, dir string, args ...string) error {
@@ -22,23 +24,21 @@ func runHook(t *testing.T, dir string, args ...string) error {
 func writePreCommitMetaForHook(t *testing.T, repo, prevValue string) {
 	t.Helper()
 	commonDir := filepath.Join(repo, ".git")
-	meta := preCommitMeta{
-		InstallState:           preCommitStateInstalled,
+	meta := tools.PreCommitMeta{
+		InstallState:           tools.PreCommitStateInstalled,
 		PreviousHooksPathState: "set",
 		PreviousHooksPathValue: prevValue,
-		NewHooksPathValue:      preCommitHooksDir(commonDir),
-		WrapperChecksum:        sha256hex([]byte(preCommitWrapperScript)),
+		NewHooksPathValue:      tools.PreCommitHooksDir(commonDir),
+		WrapperChecksum:        tools.SHA256Hex([]byte(tools.PreCommitWrapperScript)),
 	}
-	entry := toolsMetadataEntry{
-		Component:         preCommitComponentID,
-		ManagedMode:       managedModeConfig,
-		ComponentMetadata: meta.toMap(),
+	entry := tools.MetadataEntry{
+		Component:         tools.PreCommitComponentID,
+		ManagedMode:       tools.ManagedModeConfig,
+		ComponentMetadata: meta.ToMap(),
 		CreatedAt:         time.Now().UTC().Format(time.RFC3339),
 		UpdatedAt:         time.Now().UTC().Format(time.RFC3339),
 	}
-	if err := persistPreCommitEntry(repo, entry); err != nil {
-		t.Fatalf("persist metadata: %v", err)
-	}
+	persistToolsEntry(t, repo, entry)
 }
 
 // writePrevHook creates an executable (unless mode says otherwise) pre-commit
@@ -319,13 +319,13 @@ func TestRunPreviousPreCommitNoMetadata(t *testing.T) {
 }
 
 func TestSamePathSafe(t *testing.T) {
-	if samePathSafe("", "/x") || samePathSafe("/x", "") {
+	if tools.SamePathSafe("", "/x") || tools.SamePathSafe("/x", "") {
 		t.Fatal("empty inputs must never match")
 	}
-	if !samePathSafe("/a/b", "/a/b") {
+	if !tools.SamePathSafe("/a/b", "/a/b") {
 		t.Fatal("identical clean paths should match")
 	}
-	if samePathSafe("/a/b", "/a/c") {
+	if tools.SamePathSafe("/a/b", "/a/c") {
 		t.Fatal("different paths should not match")
 	}
 }
@@ -334,16 +334,14 @@ func TestRunPreviousPreCommitEmptyPath(t *testing.T) {
 	repo := toolsTestRepo(t)
 	commonDir := filepath.Join(repo, ".git")
 	// Installed metadata with no previous hook recorded → nothing to chain.
-	entry := toolsMetadataEntry{
-		Component:         preCommitComponentID,
-		ManagedMode:       managedModeConfig,
-		ComponentMetadata: preCommitMeta{InstallState: preCommitStateInstalled}.toMap(),
+	entry := tools.MetadataEntry{
+		Component:         tools.PreCommitComponentID,
+		ManagedMode:       tools.ManagedModeConfig,
+		ComponentMetadata: tools.PreCommitMeta{InstallState: tools.PreCommitStateInstalled}.ToMap(),
 		CreatedAt:         time.Now().UTC().Format(time.RFC3339),
 		UpdatedAt:         time.Now().UTC().Format(time.RFC3339),
 	}
-	if err := persistPreCommitEntry(repo, entry); err != nil {
-		t.Fatal(err)
-	}
+	persistToolsEntry(t, repo, entry)
 	if err := runPreviousPreCommit(repo, commonDir, nil); err != nil {
 		t.Fatalf("empty previous path should be a no-op, got %v", err)
 	}
@@ -355,16 +353,14 @@ func TestRunPreviousPreCommitInvalidMeta(t *testing.T) {
 	// Write a pre-commit entry whose componentMetadata fails the pre-commit schema
 	// (installState "bad" is not in the allowed enum). runPreviousPreCommit must
 	// silently skip the invalid entry rather than hard-fail.
-	entry := toolsMetadataEntry{
-		Component:         preCommitComponentID,
-		ManagedMode:       managedModeConfig,
+	entry := tools.MetadataEntry{
+		Component:         tools.PreCommitComponentID,
+		ManagedMode:       tools.ManagedModeConfig,
 		ComponentMetadata: map[string]any{"installState": "bad"},
 		CreatedAt:         time.Now().UTC().Format(time.RFC3339),
 		UpdatedAt:         time.Now().UTC().Format(time.RFC3339),
 	}
-	if err := persistPreCommitEntry(repo, entry); err != nil {
-		t.Fatal(err)
-	}
+	persistToolsEntry(t, repo, entry)
 	if err := runPreviousPreCommit(repo, commonDir, nil); err != nil {
 		t.Fatalf("invalid meta should be silently skipped, got %v", err)
 	}
@@ -373,10 +369,8 @@ func TestRunPreviousPreCommitInvalidMeta(t *testing.T) {
 func TestRunPreviousPreCommitRecursionGuard(t *testing.T) {
 	repo := toolsTestRepo(t)
 	commonDir := filepath.Join(repo, ".git")
-	hooksDir := preCommitHooksDir(commonDir)
-	if err := writeManagedWrapper(filepath.Join(hooksDir, "pre-commit")); err != nil {
-		t.Fatal(err)
-	}
+	hooksDir := tools.PreCommitHooksDir(commonDir)
+	writeWrapperForTest(t, filepath.Join(hooksDir, "pre-commit"))
 	// Metadata whose previous core.hooksPath points back at git-kura's own
 	// managed dir must be skipped to avoid infinite recursion.
 	writePreCommitMetaForHook(t, repo, hooksDir)

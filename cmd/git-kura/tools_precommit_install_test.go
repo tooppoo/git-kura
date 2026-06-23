@@ -5,12 +5,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tooppoo/git-kura/internal/tools"
 )
 
-func installCtx(repo, commonDir string) toolsInstallContext {
-	return toolsInstallContext{
-		toolsContext:   toolsContext{repoRoot: repo, commonDir: commonDir},
-		releaseVersion: fixtureVersion,
+func installCtx(repo, commonDir string) tools.InstallContext {
+	return tools.InstallContext{
+		Context:        tools.Context{RepoRoot: repo, CommonDir: commonDir},
+		ReleaseVersion: fixtureVersion,
 	}
 }
 
@@ -38,7 +40,7 @@ func TestPreCommitInstallSetsHooksPathAndIsIdempotent(t *testing.T) {
 	if !ok {
 		t.Fatal("core.hooksPath should be set in local config")
 	}
-	if !samePathSafe(got, hooksDir) {
+	if !tools.SamePathSafe(got, hooksDir) {
 		t.Fatalf("core.hooksPath = %q, want %q", got, hooksDir)
 	}
 	if !filepath.IsAbs(got) {
@@ -46,7 +48,7 @@ func TestPreCommitInstallSetsHooksPathAndIsIdempotent(t *testing.T) {
 	}
 
 	meta, ok := readPreCommitMeta(t, repo)
-	if !ok || meta.InstallState != preCommitStateInstalled {
+	if !ok || meta.InstallState != tools.PreCommitStateInstalled {
 		t.Fatalf("metadata installState = %q (ok=%v), want installed", meta.InstallState, ok)
 	}
 	if meta.PreviousLocalHooksPathState != "unset" {
@@ -84,7 +86,7 @@ func TestPreCommitReinstallRepairsInconsistent(t *testing.T) {
 		t.Fatalf("repair should report updated:\n%s", out)
 	}
 	got, ok := gitConfigLocal(t, repo, "core.hooksPath")
-	if !ok || !samePathSafe(got, managedHooksDir(repo)) {
+	if !ok || !tools.SamePathSafe(got, managedHooksDir(repo)) {
 		t.Fatalf("repair should restore core.hooksPath, got %q", got)
 	}
 	// Previous-hook metadata (captured at first install) must be preserved.
@@ -122,7 +124,7 @@ func TestPreCommitInstallCapturesPreviousHook(t *testing.T) {
 		t.Fatalf("previous effective hooks path = %q/%q, want set/%q", meta.PreviousHooksPathState, meta.PreviousHooksPathValue, prevDir)
 	}
 	// The previous pre-commit hook resolves to prevHook for this worktree.
-	if got := resolvePreviousPreCommitPath(meta, repo, filepath.Join(repo, ".git")); !samePathSafe(got, prevHook) {
+	if got := tools.ResolvePreviousPreCommitPath(meta, repo, filepath.Join(repo, ".git")); !tools.SamePathSafe(got, prevHook) {
 		t.Fatalf("resolved previous pre-commit = %q, want %q", got, prevHook)
 	}
 }
@@ -147,29 +149,29 @@ func TestResolvePreviousPreCommitPathPerWorktree(t *testing.T) {
 	commonDir := filepath.Join("/repo", ".git")
 
 	// A relative previous value resolves against the worktree the hook runs in.
-	relMeta := preCommitMeta{PreviousHooksPathState: "set", PreviousHooksPathValue: "relhooks"}
-	if got := resolvePreviousPreCommitPath(relMeta, "/install-wt", commonDir); got != filepath.Join("/install-wt", "relhooks", "pre-commit") {
+	relMeta := tools.PreCommitMeta{PreviousHooksPathState: "set", PreviousHooksPathValue: "relhooks"}
+	if got := tools.ResolvePreviousPreCommitPath(relMeta, "/install-wt", commonDir); got != filepath.Join("/install-wt", "relhooks", "pre-commit") {
 		t.Fatalf("install-wt resolution = %q", got)
 	}
-	if got := resolvePreviousPreCommitPath(relMeta, "/linked-wt", commonDir); got != filepath.Join("/linked-wt", "relhooks", "pre-commit") {
+	if got := tools.ResolvePreviousPreCommitPath(relMeta, "/linked-wt", commonDir); got != filepath.Join("/linked-wt", "relhooks", "pre-commit") {
 		t.Fatalf("linked-wt resolution = %q, want it resolved against the linked worktree", got)
 	}
 
 	// An absolute value is used as-is regardless of worktree.
-	absMeta := preCommitMeta{PreviousHooksPathState: "set", PreviousHooksPathValue: "/abs/hooks"}
-	if got := resolvePreviousPreCommitPath(absMeta, "/whatever", commonDir); got != filepath.Join("/abs/hooks", "pre-commit") {
+	absMeta := tools.PreCommitMeta{PreviousHooksPathState: "set", PreviousHooksPathValue: "/abs/hooks"}
+	if got := tools.ResolvePreviousPreCommitPath(absMeta, "/whatever", commonDir); got != filepath.Join("/abs/hooks", "pre-commit") {
 		t.Fatalf("absolute resolution = %q", got)
 	}
 
 	// Unset falls back to the common dir's default hooks directory.
-	unsetMeta := preCommitMeta{PreviousHooksPathState: "unset"}
-	if got := resolvePreviousPreCommitPath(unsetMeta, "/wt", commonDir); got != filepath.Join(commonDir, "hooks", "pre-commit") {
+	unsetMeta := tools.PreCommitMeta{PreviousHooksPathState: "unset"}
+	if got := tools.ResolvePreviousPreCommitPath(unsetMeta, "/wt", commonDir); got != filepath.Join(commonDir, "hooks", "pre-commit") {
 		t.Fatalf("unset resolution = %q", got)
 	}
 
 	// The managed dir itself is guarded against (recursion).
-	managedMeta := preCommitMeta{PreviousHooksPathState: "set", PreviousHooksPathValue: preCommitHooksDir(commonDir)}
-	if got := resolvePreviousPreCommitPath(managedMeta, "/wt", commonDir); got != "" {
+	managedMeta := tools.PreCommitMeta{PreviousHooksPathState: "set", PreviousHooksPathValue: tools.PreCommitHooksDir(commonDir)}
+	if got := tools.ResolvePreviousPreCommitPath(managedMeta, "/wt", commonDir); got != "" {
 		t.Fatalf("managed dir should be guarded, got %q", got)
 	}
 }
@@ -207,9 +209,9 @@ func TestPreCommitInstallFailsWritingPendingMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	o := preCommitComponent{}.install(installCtx(repo, commonDir))
-	if o.result.Action != actionFailed || !strings.Contains(o.result.Reason, "pending metadata") {
-		t.Fatalf("expected pending-metadata failure, got %+v", o.result)
+	o := tools.PreCommitComponent{}.Install(installCtx(repo, commonDir))
+	if o.Result.Action != tools.ActionFailed || !strings.Contains(o.Result.Reason, "pending metadata") {
+		t.Fatalf("expected pending-metadata failure, got %+v", o.Result)
 	}
 	if _, ok := gitConfigLocal(t, repo, "core.hooksPath"); ok {
 		t.Fatal("core.hooksPath must not be set when pending metadata write fails")
@@ -221,7 +223,7 @@ func TestPreCommitInstallFailsWritingWrapper(t *testing.T) {
 	commonDir := filepath.Join(repo, ".git")
 	// Pre-create the managed hooks root as a file so the wrapper directory
 	// cannot be created.
-	hooksRoot := preCommitManagedRoot(commonDir)
+	hooksRoot := tools.PreCommitManagedRoot(commonDir)
 	if err := os.MkdirAll(filepath.Dir(hooksRoot), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -229,124 +231,12 @@ func TestPreCommitInstallFailsWritingWrapper(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	o := preCommitComponent{}.install(installCtx(repo, commonDir))
-	if o.result.Action != actionFailed || !strings.Contains(o.result.Reason, "managed wrapper") {
-		t.Fatalf("expected wrapper-write failure, got %+v", o.result)
+	o := tools.PreCommitComponent{}.Install(installCtx(repo, commonDir))
+	if o.Result.Action != tools.ActionFailed || !strings.Contains(o.Result.Reason, "managed wrapper") {
+		t.Fatalf("expected wrapper-write failure, got %+v", o.Result)
 	}
 	// Pending metadata must have been cleaned up on this failure.
 	if _, ok := readPreCommitMeta(t, repo); ok {
 		t.Fatal("pending metadata should be removed after wrapper-write failure")
-	}
-}
-
-func TestRollbackReason(t *testing.T) {
-	if got := rollbackReason("primary", nil); got != "primary" {
-		t.Fatalf("nil rollback err: got %q", got)
-	}
-	got := rollbackReason("primary", os.ErrPermission)
-	if !strings.Contains(got, "rollback also failed") {
-		t.Fatalf("rollback failure should be surfaced: %q", got)
-	}
-}
-
-func TestRollbackPreCommitRestoresConfig(t *testing.T) {
-	repo := toolsTestRepo(t)
-	managedRoot := preCommitManagedRoot(filepath.Join(repo, ".git"))
-	if err := os.MkdirAll(managedRoot, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	git(t, repo, "config", "--local", "core.hooksPath", filepath.Join(repo, "managed"))
-
-	prev := preCommitPrevHook{localState: "set", localValue: filepath.Join(repo, "old")}
-	if err := rollbackPreCommit(repo, managedRoot, prev); err != nil {
-		t.Fatalf("rollback: %v", err)
-	}
-	got, _ := gitConfigLocal(t, repo, "core.hooksPath")
-	if got != prev.localValue {
-		t.Fatalf("core.hooksPath = %q, want %q", got, prev.localValue)
-	}
-	if _, err := os.Stat(managedRoot); !os.IsNotExist(err) {
-		t.Fatalf("managed root should be removed: %v", err)
-	}
-
-	if err := rollbackPreCommit(repo, managedRoot, preCommitPrevHook{localState: "unset"}); err != nil {
-		t.Fatalf("rollback unset: %v", err)
-	}
-	if _, ok := gitConfigLocal(t, repo, "core.hooksPath"); ok {
-		t.Fatal("core.hooksPath should be unset")
-	}
-}
-
-func TestResolvePreviousHookLookupRecursionGuard(t *testing.T) {
-	repo := toolsTestRepo(t)
-	commonDir := filepath.Join(repo, ".git")
-	// core.hooksPath already points at git-kura's own managed dir.
-	git(t, repo, "config", "--local", "core.hooksPath", preCommitHooksDir(commonDir))
-
-	prev, err := resolvePreviousHookLookup(repo, commonDir)
-	if err != nil {
-		t.Fatalf("resolvePreviousHookLookup: %v", err)
-	}
-	// Local restore target must not be ourselves.
-	if prev.localState != "unset" {
-		t.Fatalf("orphaned local value must be treated as unset, got %q", prev.localState)
-	}
-	// The captured effective value (the managed dir) must resolve to no previous
-	// hook at runtime, preventing recursion.
-	meta := preCommitMeta{PreviousHooksPathState: prev.effectiveState, PreviousHooksPathValue: prev.effectiveValue}
-	if got := resolvePreviousPreCommitPath(meta, repo, commonDir); got != "" {
-		t.Fatalf("managed dir must not chain as previous hook, got %q", got)
-	}
-}
-
-func TestResolvePreviousHookLookupErrorsOutsideRepo(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := resolvePreviousHookLookup(dir, filepath.Join(dir, ".git")); err == nil {
-		t.Fatal("resolvePreviousHookLookup should error when git config cannot run")
-	}
-}
-
-func TestResolvePreviousHookLookupOrphanLocalValue(t *testing.T) {
-	repo := toolsTestRepo(t)
-	commonDir := filepath.Join(repo, ".git")
-	// Local already points at git-kura's own managed dir (orphaned install): it
-	// must not be recorded as the local restore target.
-	git(t, repo, "config", "--local", "core.hooksPath", preCommitHooksDir(commonDir))
-
-	prev, err := resolvePreviousHookLookup(repo, commonDir)
-	if err != nil {
-		t.Fatalf("resolvePreviousHookLookup: %v", err)
-	}
-	if prev.localState != "unset" || prev.localValue != "" {
-		t.Fatalf("orphaned local value must be treated as unset, got %q/%q", prev.localState, prev.localValue)
-	}
-}
-
-func TestPersistAndDeleteEntryErrorOnBadStore(t *testing.T) {
-	repo := toolsTestRepo(t)
-	// Make the tools metadata directory path a file so read/write of
-	// installed.json fails.
-	toolsDir := filepath.Join(repo, ".git", "kura", "tools")
-	if err := os.MkdirAll(filepath.Dir(toolsDir), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(toolsDir, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := persistPreCommitEntry(repo, toolsMetadataEntry{Component: preCommitComponentID, ManagedMode: managedModeConfig}); err == nil {
-		t.Fatal("persist should fail on an unreadable store")
-	}
-	if err := deletePreCommitEntry(repo); err == nil {
-		t.Fatal("delete should fail on an unreadable store")
-	}
-}
-
-func TestPersistDeleteEntryNonRepoError(t *testing.T) {
-	dir := t.TempDir() // not a git repo — toolsMetadataPaths fails at CommonDir
-	if err := persistPreCommitEntry(dir, toolsMetadataEntry{}); err == nil {
-		t.Fatal("persistPreCommitEntry should fail outside a git repo")
-	}
-	if err := deletePreCommitEntry(dir); err == nil {
-		t.Fatal("deletePreCommitEntry should fail outside a git repo")
 	}
 }

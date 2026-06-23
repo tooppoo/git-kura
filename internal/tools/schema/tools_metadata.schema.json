@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/cmd/git-kura/schema/tools_metadata.schema.json",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/internal/tools/schema/tools_metadata.schema.json",
   "title": "git kura tools install metadata",
   "description": "Schema for <git-common-dir>/kura/tools/installed.json, the record of git-kura managed tool components installed in this repository.",
   "type": "object",

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tooppoo/git-kura/internal/tools"
 )
 
 func TestSkillUninstallRemovesFile(t *testing.T) {
@@ -12,11 +14,11 @@ func TestSkillUninstallRemovesFile(t *testing.T) {
 	content := []byte("skill content")
 	deps := skillDeps(t, content, []byte("codex"))
 
-	if _, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID); err != nil {
+	if _, err := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
-	out, err := runToolsCLI(t, repo, deps, "uninstall", claudeSkillComponentID)
+	out, err := runToolsCLI(t, repo, deps, "uninstall", tools.ClaudeSkillComponentID)
 	if err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, out)
 	}
@@ -27,11 +29,11 @@ func TestSkillUninstallRemovesFile(t *testing.T) {
 	assertPathMissing(t, claudeSkillDest(repo))
 
 	// metadata entry must be removed
-	store, err := readToolsMetadata(installedJSONPath(repo))
+	store, err := tools.ReadMetadata(installedJSONPath(repo))
 	if err != nil {
 		t.Fatalf("read metadata: %v", err)
 	}
-	if _, ok := store.Components[claudeSkillComponentID]; ok {
+	if _, ok := store.Components[tools.ClaudeSkillComponentID]; ok {
 		t.Fatal("metadata entry should be removed after uninstall")
 	}
 }
@@ -41,7 +43,7 @@ func TestSkillUninstallSkipsUserModifiedFile(t *testing.T) {
 	content := []byte("skill content")
 	deps := skillDeps(t, content, []byte("codex"))
 
-	if _, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID); err != nil {
+	if _, err := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -49,7 +51,7 @@ func TestSkillUninstallSkipsUserModifiedFile(t *testing.T) {
 	dest := claudeSkillDest(repo)
 	appendFile(t, dest, "\nuser addition")
 
-	out, err := runToolsCLI(t, repo, deps, "uninstall", claudeSkillComponentID)
+	out, err := runToolsCLI(t, repo, deps, "uninstall", tools.ClaudeSkillComponentID)
 	if err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, out)
 	}
@@ -65,7 +67,7 @@ func TestSkillUninstallNotInstalledIsNoOp(t *testing.T) {
 	repo := toolsTestRepo(t)
 	deps := skillDeps(t, []byte("c"), []byte("co"))
 
-	out, err := runToolsCLI(t, repo, deps, "uninstall", claudeSkillComponentID)
+	out, err := runToolsCLI(t, repo, deps, "uninstall", tools.ClaudeSkillComponentID)
 	if err != nil {
 		t.Fatalf("uninstall without prior install: %v\n%s", err, out)
 	}
@@ -79,7 +81,7 @@ func TestSkillUninstallDoesNotRemoveParentDir(t *testing.T) {
 	content := []byte("skill content")
 	deps := skillDeps(t, content, []byte("codex"))
 
-	if _, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID); err != nil {
+	if _, err := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -87,7 +89,7 @@ func TestSkillUninstallDoesNotRemoveParentDir(t *testing.T) {
 	otherFile := filepath.Join(repo, ".claude", "skills", "other.md")
 	writeFile(t, otherFile, "other user skill")
 
-	if _, err := runToolsCLI(t, repo, deps, "uninstall", claudeSkillComponentID); err != nil {
+	if _, err := runToolsCLI(t, repo, deps, "uninstall", tools.ClaudeSkillComponentID); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
 
@@ -101,7 +103,7 @@ func TestSkillUninstallWhenFileAlreadyDeleted(t *testing.T) {
 	content := []byte("skill content")
 	deps := skillDeps(t, content, []byte("codex"))
 
-	if _, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID); err != nil {
+	if _, err := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -109,7 +111,7 @@ func TestSkillUninstallWhenFileAlreadyDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := runToolsCLI(t, repo, deps, "uninstall", claudeSkillComponentID)
+	out, err := runToolsCLI(t, repo, deps, "uninstall", tools.ClaudeSkillComponentID)
 	if err != nil {
 		t.Fatalf("uninstall with already-deleted file: %v\n%s", err, out)
 	}

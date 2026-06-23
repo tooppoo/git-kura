@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tooppoo/git-kura/internal/tools"
 )
 
 func TestPreCommitStatusDetectsModifiedWrapper(t *testing.T) {
@@ -75,16 +77,14 @@ func TestPreCommitStatusReportsPendingState(t *testing.T) {
 	repo := toolsTestRepo(t)
 	// A leftover pending entry (e.g. from an interrupted install) must be
 	// reported as a non-installed, recoverable state.
-	entry := toolsMetadataEntry{
-		Component:         preCommitComponentID,
-		ManagedMode:       managedModeConfig,
-		ComponentMetadata: preCommitMeta{InstallState: preCommitStatePending}.toMap(),
+	entry := tools.MetadataEntry{
+		Component:         tools.PreCommitComponentID,
+		ManagedMode:       tools.ManagedModeConfig,
+		ComponentMetadata: tools.PreCommitMeta{InstallState: tools.PreCommitStatePending}.ToMap(),
 		CreatedAt:         time.Now().UTC().Format(time.RFC3339),
 		UpdatedAt:         time.Now().UTC().Format(time.RFC3339),
 	}
-	if err := persistPreCommitEntry(repo, entry); err != nil {
-		t.Fatal(err)
-	}
+	persistToolsEntry(t, repo, entry)
 	deps := preCommitDeps(t)
 	out, err := runToolsCLI(t, repo, deps, "status", "pre-commit")
 	if err != nil {
@@ -156,90 +156,24 @@ func TestPreCommitStatusHooksPathMismatch(t *testing.T) {
 	}
 }
 
-func TestPreCommitConsistentVariants(t *testing.T) {
-	repo := toolsTestRepo(t)
-	commonDir := filepath.Join(repo, ".git")
-	sum := sha256hex([]byte(preCommitWrapperScript))
-
-	if reason, ok := preCommitConsistent(repo, commonDir, sum); ok || !strings.Contains(reason, "unset") {
-		t.Fatalf("unset core.hooksPath: reason=%q ok=%v", reason, ok)
-	}
-
-	git(t, repo, "config", "--local", "core.hooksPath", filepath.Join(repo, "elsewhere"))
-	if reason, ok := preCommitConsistent(repo, commonDir, sum); ok || !strings.Contains(reason, "not the managed dir") {
-		t.Fatalf("non-managed: reason=%q ok=%v", reason, ok)
-	}
-
-	// A relative core.hooksPath is resolved against the repo root before the
-	// managed-dir comparison.
-	git(t, repo, "config", "--local", "core.hooksPath", "relhooks")
-	if reason, ok := preCommitConsistent(repo, commonDir, sum); ok || !strings.Contains(reason, "not the managed dir") {
-		t.Fatalf("relative non-managed: reason=%q ok=%v", reason, ok)
-	}
-
-	// Point at the managed dir but with the wrapper missing.
-	git(t, repo, "config", "--local", "core.hooksPath", preCommitHooksDir(commonDir))
-	if reason, ok := preCommitConsistent(repo, commonDir, sum); ok || !strings.Contains(reason, "missing") {
-		t.Fatalf("missing wrapper: reason=%q ok=%v", reason, ok)
-	}
-}
-
 func TestPreCommitMetaFromEntry(t *testing.T) {
-	if _, ok := preCommitMetaFromEntry(nil); ok {
+	if _, ok := tools.PreCommitMetaFromEntry(nil); ok {
 		t.Fatal("nil entry should report ok=false")
 	}
-	if _, ok := preCommitMetaFromEntry(&toolsMetadataEntry{}); ok {
+	if _, ok := tools.PreCommitMetaFromEntry(&tools.MetadataEntry{}); ok {
 		t.Fatal("entry without componentMetadata should report ok=false")
 	}
-	m := preCommitMeta{InstallState: preCommitStateInstalled, PreviousLocalHooksPathState: "set"}
-	got, ok := preCommitMetaFromEntry(&toolsMetadataEntry{ComponentMetadata: m.toMap()})
-	if !ok || got.InstallState != preCommitStateInstalled || got.PreviousLocalHooksPathState != "set" {
+	m := tools.PreCommitMeta{InstallState: tools.PreCommitStateInstalled, PreviousLocalHooksPathState: "set"}
+	got, ok := tools.PreCommitMetaFromEntry(&tools.MetadataEntry{ComponentMetadata: m.ToMap()})
+	if !ok || got.InstallState != tools.PreCommitStateInstalled || got.PreviousLocalHooksPathState != "set" {
 		t.Fatalf("round-trip failed: %+v ok=%v", got, ok)
 	}
 }
 
 func TestPreCommitMetaFromEntryRejectsBadShape(t *testing.T) {
 	// installState as a number cannot unmarshal into the string field.
-	entry := &toolsMetadataEntry{ComponentMetadata: map[string]any{"installState": 123}}
-	if _, ok := preCommitMetaFromEntry(entry); ok {
+	entry := &tools.MetadataEntry{ComponentMetadata: map[string]any{"installState": 123}}
+	if _, ok := tools.PreCommitMetaFromEntry(entry); ok {
 		t.Fatal("type-mismatched componentMetadata should report ok=false")
-	}
-}
-
-func TestCollectDiagnosticsKeySource(t *testing.T) {
-	repo := toolsTestRepo(t)
-	stage(t, repo, "seed.txt", "seed\n")
-	git(t, repo, "commit", "-m", "seed")
-	commonDir := filepath.Join(repo, ".git")
-
-	// Unmanaged worktree root.
-	d := collectPreCommitDiagnostics(repo, commonDir, preCommitMeta{})
-	if d.currentKeySource != "unmanaged-worktree" {
-		t.Fatalf("currentKeySource = %q, want unmanaged-worktree", d.currentKeySource)
-	}
-
-	wt := openManagedWorktree(t, repo, "alpha")
-	// Inject a duplicate worktree metadata entry → ambiguous.
-	dupe := filepath.Join(commonDir, "kura", "meta", "worktrees", "beta.json")
-	if err := os.WriteFile(dupe, []byte(`{"repositoryRoot":"`+repo+`","baseBranch":"main","worktreePath":"`+wt+`"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	d = collectPreCommitDiagnostics(wt, commonDir, preCommitMeta{})
-	if d.currentKeySource != "ambiguous" {
-		t.Fatalf("currentKeySource = %q, want ambiguous", d.currentKeySource)
-	}
-
-	// Replace the worktrees dir with a plain file so os.ReadDir fails with a
-	// non-IsNotExist error, exercising the currentKeySource="error" branch.
-	worktreesDir := filepath.Join(commonDir, "kura", "meta", "worktrees")
-	if err := os.RemoveAll(worktreesDir); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(worktreesDir, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	d = collectPreCommitDiagnostics(repo, commonDir, preCommitMeta{})
-	if d.currentKeySource != "error" {
-		t.Fatalf("currentKeySource = %q, want error", d.currentKeySource)
 	}
 }

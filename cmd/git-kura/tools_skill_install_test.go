@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tooppoo/git-kura/internal/tools"
 )
 
 func TestSkillInstallCreatesFile(t *testing.T) {
@@ -17,7 +19,7 @@ func TestSkillInstallCreatesFile(t *testing.T) {
 	}{
 		{
 			name:        "claude",
-			componentID: claudeSkillComponentID,
+			componentID: tools.ClaudeSkillComponentID,
 			content:     []byte("claude skill content"),
 			deps: func(t *testing.T, content []byte) toolsDeps {
 				return skillDeps(t, content, []byte("codex skill content"))
@@ -26,7 +28,7 @@ func TestSkillInstallCreatesFile(t *testing.T) {
 		},
 		{
 			name:        "codex",
-			componentID: codexSkillComponentID,
+			componentID: tools.CodexSkillComponentID,
 			content:     []byte("codex skill content"),
 			deps: func(t *testing.T, content []byte) toolsDeps {
 				return skillDeps(t, []byte("claude skill content"), content)
@@ -67,12 +69,12 @@ func TestSkillInstallIsIdempotent(t *testing.T) {
 	deps := skillDeps(t, content, []byte("codex"))
 
 	// First install
-	if _, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID); err != nil {
+	if _, err := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
 
 	// Second install with same content
-	out, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID)
+	out, err := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID)
 	if err != nil {
 		t.Fatalf("second install: %v\n%s", err, out)
 	}
@@ -89,22 +91,22 @@ func TestSkillInstallUpdatesOldVersion(t *testing.T) {
 	// Install v1
 	deps1 := skillFetcherForVersion(t, "1.0.0", v1, []byte("codex"))
 	d1 := toolsDeps{
-		registry: newToolsRegistry(newClaudeSkillComponent()),
+		registry: mustToolsRegistry(t, tools.NewClaudeSkillComponent()),
 		version:  "1.0.0",
 		fetcher:  deps1,
 	}
-	if _, err := runToolsCLI(t, repo, d1, "install", claudeSkillComponentID); err != nil {
+	if _, err := runToolsCLI(t, repo, d1, "install", tools.ClaudeSkillComponentID); err != nil {
 		t.Fatalf("install v1: %v", err)
 	}
 
 	// Install v2 (different content → updated)
 	deps2 := skillFetcherForVersion(t, "2.0.0", v2, []byte("codex"))
 	d2 := toolsDeps{
-		registry: newToolsRegistry(newClaudeSkillComponent()),
+		registry: mustToolsRegistry(t, tools.NewClaudeSkillComponent()),
 		version:  "2.0.0",
 		fetcher:  deps2,
 	}
-	out, err := runToolsCLI(t, repo, d2, "install", claudeSkillComponentID)
+	out, err := runToolsCLI(t, repo, d2, "install", tools.ClaudeSkillComponentID)
 	if err != nil {
 		t.Fatalf("install v2: %v\n%s", err, out)
 	}
@@ -131,7 +133,7 @@ func TestSkillInstallRejectsUnmanagedFile(t *testing.T) {
 	}
 	writeFile(t, dest, "user-created content")
 
-	out, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID)
+	out, err := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID)
 	requireToolsExit(t, err, exitGeneralError)
 	if !strings.Contains(out, "failed") {
 		t.Fatalf("install with unmanaged file should fail:\n%s", out)
@@ -147,7 +149,7 @@ func TestSkillInstallRejectsUserModifiedFile(t *testing.T) {
 	deps := skillDeps(t, content, []byte("codex"))
 
 	// Install cleanly
-	if _, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID); err != nil {
+	if _, err := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
 
@@ -156,7 +158,7 @@ func TestSkillInstallRejectsUserModifiedFile(t *testing.T) {
 	appendFile(t, dest, "\nuser addition")
 
 	// Re-install should fail
-	out, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID)
+	out, err := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID)
 	requireToolsExit(t, err, exitGeneralError)
 	if !strings.Contains(out, "failed") {
 		t.Fatalf("install with user-modified file should fail:\n%s", out)
@@ -176,7 +178,7 @@ func TestSkillInstallFromManagedWorktree(t *testing.T) {
 	deps := skillDeps(t, content, []byte("codex"))
 
 	// Install from inside the managed worktree — skill must land in repo root
-	out, err := runToolsCLI(t, worktreePath, deps, "install", claudeSkillComponentID)
+	out, err := runToolsCLI(t, worktreePath, deps, "install", tools.ClaudeSkillComponentID)
 	if err != nil {
 		t.Fatalf("install from worktree: %v\n%s", err, out)
 	}
@@ -194,24 +196,24 @@ func TestSkillInstallPersistsMetadata(t *testing.T) {
 	content := []byte("skill content")
 	deps := skillDeps(t, content, []byte("codex"))
 
-	if _, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID); err != nil {
+	if _, err := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
-	store, err := readToolsMetadata(installedJSONPath(repo))
+	store, err := tools.ReadMetadata(installedJSONPath(repo))
 	if err != nil {
 		t.Fatalf("read metadata: %v", err)
 	}
 
-	entry, ok := store.Components[claudeSkillComponentID]
+	entry, ok := store.Components[tools.ClaudeSkillComponentID]
 	if !ok {
 		t.Fatal("metadata entry should exist after install")
 	}
-	if entry.Checksum != sha256hex(content) {
-		t.Fatalf("metadata checksum = %q, want %q", entry.Checksum, sha256hex(content))
+	if entry.Checksum != tools.SHA256Hex(content) {
+		t.Fatalf("metadata checksum = %q, want %q", entry.Checksum, tools.SHA256Hex(content))
 	}
-	if entry.ManagedMode != managedModeFile {
-		t.Fatalf("metadata managedMode = %q, want %q", entry.ManagedMode, managedModeFile)
+	if entry.ManagedMode != tools.ManagedModeFile {
+		t.Fatalf("metadata managedMode = %q, want %q", entry.ManagedMode, tools.ManagedModeFile)
 	}
 	if entry.DestinationPath != claudeSkillDest(repo) {
 		t.Fatalf("metadata destinationPath = %q, want %q", entry.DestinationPath, claudeSkillDest(repo))
@@ -223,20 +225,21 @@ func TestSkillInstallHoldsLock(t *testing.T) {
 	content := []byte("skill content")
 	deps := skillDeps(t, content, []byte("codex"))
 
-	// Acquire the metadata lock manually before install
-	storeFile, lockFile, err := toolsMetadataPaths(repo)
+	// Acquire the metadata lock manually before install.
+	_, lockFile, err := tools.MetadataPaths(repo)
 	if err != nil {
 		t.Fatalf("metadata paths: %v", err)
 	}
-	_ = storeFile
-	release, err := acquireToolsLock(lockFile, 0)
-	if err != nil {
-		t.Fatalf("acquire lock: %v", err)
+	if err := os.MkdirAll(filepath.Dir(lockFile), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	defer release()
+	if err := os.WriteFile(lockFile, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(lockFile) }()
 
 	// Install should fail with lock timeout (or general error if timeout=0)
-	_, installErr := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID)
+	_, installErr := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID)
 	if installErr == nil {
 		t.Fatal("install should fail when lock is held")
 	}
@@ -248,22 +251,22 @@ func TestSkillInstallBlockedWhenMetadataDeletedButFileExists(t *testing.T) {
 	deps := skillDeps(t, content, []byte("codex"))
 
 	// Install
-	if _, err := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID); err != nil {
+	if _, err := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
 
 	// Remove metadata entry, simulating lost metadata
-	store, err := readToolsMetadata(installedJSONPath(repo))
+	store, err := tools.ReadMetadata(installedJSONPath(repo))
 	if err != nil {
 		t.Fatalf("read metadata: %v", err)
 	}
-	delete(store.Components, claudeSkillComponentID)
-	if err := writeToolsMetadata(installedJSONPath(repo), store); err != nil {
+	delete(store.Components, tools.ClaudeSkillComponentID)
+	if err := tools.WriteMetadata(installedJSONPath(repo), store); err != nil {
 		t.Fatalf("write metadata: %v", err)
 	}
 
 	// Install should fail: file exists but no metadata → unmanaged
-	out, installErr := runToolsCLI(t, repo, deps, "install", claudeSkillComponentID)
+	out, installErr := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID)
 	requireToolsExit(t, installErr, exitGeneralError)
 	if !strings.Contains(out, "unmanaged") {
 		t.Fatalf("install with deleted metadata and existing file should fail as unmanaged:\n%s", out)

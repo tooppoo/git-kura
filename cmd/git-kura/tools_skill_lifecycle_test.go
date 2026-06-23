@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/tooppoo/git-kura/internal/tools"
 )
 
 func TestBothSkillsInstallAndUninstall(t *testing.T) {
@@ -21,7 +23,7 @@ func TestBothSkillsInstallAndUninstall(t *testing.T) {
 	assertPathExists(t, codexSkillDest(repo))
 
 	// Status should show both installed
-	out, err = runToolsCLI(t, repo, deps, "status", claudeSkillComponentID, codexSkillComponentID)
+	out, err = runToolsCLI(t, repo, deps, "status", tools.ClaudeSkillComponentID, tools.CodexSkillComponentID)
 	if err != nil {
 		t.Fatalf("status: %v\n%s", err, out)
 	}
