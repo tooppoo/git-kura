@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tooppoo/git-kura/internal/output"
+	"github.com/tooppoo/git-kura/internal/seal"
 )
 
 // TestAllStructuredCommandsHaveHumanRenderable verifies that every structured
@@ -27,11 +28,11 @@ func TestAllStructuredCommandsHaveHumanRenderable(t *testing.T) {
 			WorktreePath: "/p", RepositoryRoot: "/r", BaseBranch: "main",
 		},
 		"closeDataJSON":   closeDataJSON{Key: "k", WorktreePath: "/p", Branch: "k"},
-		"sealClaimData":   sealClaimData{CurrentKey: "k", Paths: []sealClaimPathItem{{Path: "f", Status: "claimed"}}},
-		"sealUnclaimData": sealUnclaimData{CurrentKey: "k", Paths: []sealUnclaimPathItem{{Path: "f", Status: "released"}}},
-		"sealTestData":    sealTestData{CurrentKey: "k", Passed: true, Results: []sealTestResultItem{}},
-		"sealLsData":      sealLsData{Claims: []sealLsClaim{{Key: "k", Path: "f"}}},
-		"sealDoctorData":  sealDoctorData{Healthy: true, Summary: sealDoctorSummary{}, Findings: []sealDoctorFinding{}},
+		"sealClaimData":   seal.ClaimResult{CurrentKey: "k", Paths: []seal.ClaimPathItem{{Path: "f", Status: "claimed"}}},
+		"sealUnclaimData": seal.UnclaimResult{CurrentKey: "k", Paths: []seal.UnclaimPathItem{{Path: "f", Status: "released"}}},
+		"sealTestData":    seal.TestResult{CurrentKey: "k", Passed: true, Results: []seal.TestResultItem{}},
+		"sealLsData":      seal.LsResult{Claims: []seal.LsClaim{{Key: "k", Path: "f"}}},
+		"sealDoctorData":  seal.DoctorResult{Healthy: true, Summary: seal.DoctorSummary{}, Findings: []seal.DoctorFinding{}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, ok := data.(output.HumanRenderable); !ok {
@@ -45,9 +46,9 @@ func TestAllStructuredCommandsHaveHumanRenderable(t *testing.T) {
 
 func TestSealClaimHumanOutputContainsClaimedPaths(t *testing.T) {
 	var buf bytes.Buffer
-	data := sealClaimData{
+	data := seal.ClaimResult{
 		CurrentKey: "key1",
-		Paths: []sealClaimPathItem{
+		Paths: []seal.ClaimPathItem{
 			{Path: "src/foo.go", Status: "claimed"},
 			{Path: "src/bar.go", Status: "claimed"},
 		},
@@ -65,9 +66,9 @@ func TestSealClaimHumanOutputContainsClaimedPaths(t *testing.T) {
 
 func TestSealClaimHumanOutputContainsAlreadyOwnedPaths(t *testing.T) {
 	var buf bytes.Buffer
-	data := sealClaimData{
+	data := seal.ClaimResult{
 		CurrentKey: "key1",
-		Paths: []sealClaimPathItem{
+		Paths: []seal.ClaimPathItem{
 			{Path: "src/foo.go", Status: "already-owned"},
 		},
 	}
@@ -86,9 +87,9 @@ func TestSealClaimHumanOutputContainsAlreadyOwnedPaths(t *testing.T) {
 
 func TestSealUnclaimHumanOutputContainsReleasedPaths(t *testing.T) {
 	var buf bytes.Buffer
-	data := sealUnclaimData{
+	data := seal.UnclaimResult{
 		CurrentKey: "key1",
-		Paths: []sealUnclaimPathItem{
+		Paths: []seal.UnclaimPathItem{
 			{Path: "src/foo.go", Status: "released"},
 		},
 	}
@@ -105,9 +106,9 @@ func TestSealUnclaimHumanOutputContainsReleasedPaths(t *testing.T) {
 
 func TestSealUnclaimHumanOutputContainsNotClaimedPaths(t *testing.T) {
 	var buf bytes.Buffer
-	data := sealUnclaimData{
+	data := seal.UnclaimResult{
 		CurrentKey: "key1",
-		Paths: []sealUnclaimPathItem{
+		Paths: []seal.UnclaimPathItem{
 			{Path: "src/bar.go", Status: "not-claimed"},
 		},
 	}
@@ -191,7 +192,7 @@ func TestSealDoctorHumanUnhealthyDistinguishableFromExecutionFailure(t *testing.
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
-	storeFile, _, err := pathsSealStore(repo)
+	storeFile, _, err := seal.StorePaths(repo)
 	if err != nil {
 		t.Fatalf("pathsSealStore: %v", err)
 	}
@@ -327,7 +328,7 @@ func TestSealDoctorUnhealthyHumanSnapshot(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
-	storeFile, _, err := pathsSealStore(repo)
+	storeFile, _, err := seal.StorePaths(repo)
 	if err != nil {
 		t.Fatalf("pathsSealStore: %v", err)
 	}

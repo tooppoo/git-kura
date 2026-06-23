@@ -25,7 +25,7 @@ test:
 
 .PHONY: coverage
 coverage:
-	go test -covermode=atomic -coverprofile=coverage.out ./...
+	go test -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
 	go tool cover -func=$(CURDIR)/coverage.out
 	@go tool cover -func=$(CURDIR)/coverage.out | awk -v threshold="$(COVERAGE_THRESHOLD)" '/^total:/ { coverage=$$3; sub(/%/, "", coverage); if (coverage + 0 < threshold + 0) { printf("coverage %.1f%% is below %.1f%%\n", coverage, threshold); exit 1 } printf("coverage %.1f%% meets %.1f%% threshold\n", coverage, threshold) }'
 

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/tooppoo/git-kura/internal/gitutil"
+	"github.com/tooppoo/git-kura/internal/seal"
 	"github.com/tooppoo/git-kura/internal/tools"
 	"github.com/tooppoo/git-kura/internal/worktree"
 )
@@ -60,12 +61,7 @@ func runPreCommitHook(hookArgs []string) error {
 		return err
 	}
 
-	storeFile, _, err := pathsSealStore(worktreeRoot)
-	if err != nil {
-		return failClosed("pre-commit hook: %v", err)
-	}
-
-	if err := preCommitSealCheck(storeFile, currentKey, worktreeRoot, "pre-hook"); err != nil {
+	if err := preCommitSealCheck(worktreeRoot, currentKey, "pre-hook"); err != nil {
 		return err
 	}
 
@@ -73,7 +69,7 @@ func runPreCommitHook(hookArgs []string) error {
 		return err
 	}
 
-	if err := preCommitSealCheck(storeFile, currentKey, worktreeRoot, "post-hook"); err != nil {
+	if err := preCommitSealCheck(worktreeRoot, currentKey, "post-hook"); err != nil {
 		return err
 	}
 	return nil
@@ -89,7 +85,7 @@ func resolveHookCurrentKey(commonDir, worktreeRoot string) (string, error) {
 	}
 	switch len(keys) {
 	case 0:
-		return sealKeyNone, nil
+		return seal.KeyNone, nil
 	case 1:
 		return keys[0], nil
 	default:
@@ -97,16 +93,15 @@ func resolveHookCurrentKey(commonDir, worktreeRoot string) (string, error) {
 	}
 }
 
-func preCommitSealCheck(storeFile, currentKey, worktreeRoot, phase string) error {
+func preCommitSealCheck(worktreeRoot, currentKey, phase string) error {
 	staged, err := gitutil.StagedFiles(worktreeRoot)
 	if err != nil {
 		return failClosed("pre-commit hook (%s): %v", phase, err)
 	}
-	store, err := readSealStore(storeFile)
+	conflicts, err := seal.EvaluatePaths(worktreeRoot, currentKey, staged)
 	if err != nil {
 		return failClosed("pre-commit hook (%s): cannot read seal store; run \"git kura seal doctor\": %v", phase, err)
 	}
-	conflicts := evaluateSealedPaths(store, currentKey, staged)
 	if len(conflicts) > 0 {
 		return sealConflictError(conflicts)
 	}

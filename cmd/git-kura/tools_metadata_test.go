@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/tooppoo/git-kura/internal/seal"
 	"github.com/tooppoo/git-kura/internal/tools"
 )
 
@@ -49,7 +50,7 @@ func TestToolsStatusFailsOnCorruptMetadata(t *testing.T) {
 func TestToolsInstallFailsWhenLockHeld(t *testing.T) {
 	repo := toolsTestRepo(t)
 	// A zero timeout makes a single lock attempt with no retry.
-	git(t, repo, "config", sealLockTimeoutConfigKey, "0")
+	git(t, repo, "config", seal.LockTimeoutConfigKey, "0")
 	fetcher, comp := fixtureAssets(t, []byte("x\n"))
 	deps := toolsDeps{registry: mustToolsRegistry(t, comp), version: fixtureVersion, fetcher: fetcher}
 
@@ -73,7 +74,7 @@ func TestToolsInstallFailsWhenLockHeld(t *testing.T) {
 func TestToolsUninstallFailsWhenLockHeld(t *testing.T) {
 	repo := toolsTestRepo(t)
 	// A zero timeout makes a single lock attempt with no retry.
-	git(t, repo, "config", sealLockTimeoutConfigKey, "0")
+	git(t, repo, "config", seal.LockTimeoutConfigKey, "0")
 	fetcher, comp := fixtureAssets(t, []byte("x\n"))
 	deps := toolsDeps{registry: mustToolsRegistry(t, comp), version: fixtureVersion, fetcher: fetcher}
 

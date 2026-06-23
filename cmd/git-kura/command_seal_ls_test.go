@@ -4,18 +4,20 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/tooppoo/git-kura/internal/seal"
 )
 
 // seedSealStore writes the given path→entry map to the repository's seal
 // store and returns the store file path.
-func seedSealStore(t *testing.T, repo string, paths map[string]sealEntry) string {
+func seedSealStore(t *testing.T, repo string, paths map[string]seal.Entry) string {
 	t.Helper()
-	storeFile, _, err := pathsSealStore(repo)
+	storeFile, _, err := seal.StorePaths(repo)
 	if err != nil {
-		t.Fatalf("pathsSealStore: %v", err)
+		t.Fatalf("seal.StorePaths: %v", err)
 	}
-	if err := writeSealStore(storeFile, sealPathStore{Paths: paths}); err != nil {
-		t.Fatalf("writeSealStore: %v", err)
+	if err := seal.WriteStore(storeFile, seal.PathStore{Paths: paths}); err != nil {
+		t.Fatalf("seal.WriteStore: %v", err)
 	}
 	return storeFile
 }
@@ -37,7 +39,7 @@ func TestCmdSealLsEmpty(t *testing.T) {
 		}
 
 		// Store exists but has no sealed paths → same result.
-		seedSealStore(t, repo, map[string]sealEntry{})
+		seedSealStore(t, repo, map[string]seal.Entry{})
 		stdout, err = captureStdout(t, func() error {
 			return run([]string{"seal", "ls"})
 		})
@@ -55,7 +57,7 @@ func TestCmdSealLsListsAllKeysSorted(t *testing.T) {
 	repo := cli.initRepo(t)
 
 	withWorkingDir(t, repo, func() {
-		seedSealStore(t, repo, map[string]sealEntry{
+		seedSealStore(t, repo, map[string]seal.Entry{
 			"src/z.go":      {Key: "key1"},
 			"src/a.go":      {Key: "key1"},
 			"docs/guide.md": {Key: "key2"},
@@ -81,7 +83,7 @@ func TestCmdSealLsFiltersByKey(t *testing.T) {
 	repo := cli.initRepo(t)
 
 	withWorkingDir(t, repo, func() {
-		seedSealStore(t, repo, map[string]sealEntry{
+		seedSealStore(t, repo, map[string]seal.Entry{
 			"src/a.go":      {Key: "key1"},
 			"docs/guide.md": {Key: "key2"},
 		})
@@ -120,9 +122,9 @@ func TestCmdSealLsInvalidStore(t *testing.T) {
 			repo := cli.initRepo(t)
 
 			withWorkingDir(t, repo, func() {
-				storeFile, _, err := pathsSealStore(repo)
+				storeFile, _, err := seal.StorePaths(repo)
 				if err != nil {
-					t.Fatalf("pathsSealStore: %v", err)
+					t.Fatalf("seal.StorePaths: %v", err)
 				}
 				if err := os.MkdirAll(filepath.Dir(storeFile), 0o755); err != nil {
 					t.Fatal(err)
@@ -144,13 +146,13 @@ func TestCmdSealLsDoesNotBlockOnLock(t *testing.T) {
 	repo := cli.initRepo(t)
 
 	withWorkingDir(t, repo, func() {
-		seedSealStore(t, repo, map[string]sealEntry{
+		seedSealStore(t, repo, map[string]seal.Entry{
 			"src/a.go": {Key: "key1"},
 		})
 
-		_, lockFile, err := pathsSealStore(repo)
+		_, lockFile, err := seal.StorePaths(repo)
 		if err != nil {
-			t.Fatalf("pathsSealStore: %v", err)
+			t.Fatalf("seal.StorePaths: %v", err)
 		}
 		if err := os.WriteFile(lockFile, nil, 0o644); err != nil {
 			t.Fatal(err)

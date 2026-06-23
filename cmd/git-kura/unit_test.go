@@ -14,6 +14,7 @@ import (
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tooppoo/git-kura/internal/output"
+	"github.com/tooppoo/git-kura/internal/seal"
 )
 
 // Unit tests cover pure parsing and validation helpers without creating Git
@@ -493,7 +494,7 @@ func TestRequireCleanValueStdoutAcceptsWindowsPath(t *testing.T) {
 
 func TestNormalizeSealPathAbsoluteRejected(t *testing.T) {
 	root := t.TempDir()
-	_, err := normalizeSealPath(root, filepath.Join(root, "src", "foo.go"))
+	_, err := seal.NormalizePath(root, filepath.Join(root, "src", "foo.go"))
 	if err == nil {
 		t.Fatal("expected error for absolute path, got nil")
 	}
@@ -501,7 +502,7 @@ func TestNormalizeSealPathAbsoluteRejected(t *testing.T) {
 
 func TestNormalizeSealPathRootRelative(t *testing.T) {
 	root := t.TempDir()
-	path, err := normalizeSealPath(root, "src/foo.go")
+	path, err := seal.NormalizePath(root, "src/foo.go")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -519,7 +520,7 @@ func TestNormalizeSealPathIgnoresWorkingDirectory(t *testing.T) {
 	// Even when the caller's cwd is a subdirectory, the argument is resolved
 	// against the repository root, not the cwd.
 	withWorkingDir(t, sub, func() {
-		path, err := normalizeSealPath(root, "src/foo.go")
+		path, err := seal.NormalizePath(root, "src/foo.go")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -531,7 +532,7 @@ func TestNormalizeSealPathIgnoresWorkingDirectory(t *testing.T) {
 
 func TestNormalizeSealPathEscapesRepo(t *testing.T) {
 	root := t.TempDir()
-	_, err := normalizeSealPath(root, "../escape.go")
+	_, err := seal.NormalizePath(root, "../escape.go")
 	if err == nil {
 		t.Fatal("expected error for path outside repo, got nil")
 	}
@@ -540,7 +541,7 @@ func TestNormalizeSealPathEscapesRepo(t *testing.T) {
 func TestNormalizeSealPathDotDotPrefixInsideRepo(t *testing.T) {
 	root := t.TempDir()
 	// A file like "..foo/bar" starts with ".." but is inside the repo.
-	path, err := normalizeSealPath(root, "..foo/bar")
+	path, err := seal.NormalizePath(root, "..foo/bar")
 	if err != nil {
 		t.Fatalf("unexpected error for path inside repo starting with '..': %v", err)
 	}
@@ -551,7 +552,7 @@ func TestNormalizeSealPathDotDotPrefixInsideRepo(t *testing.T) {
 
 func TestNormalizeSealPathRepoRootItself(t *testing.T) {
 	root := t.TempDir()
-	path, err := normalizeSealPath(root, ".")
+	path, err := seal.NormalizePath(root, ".")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -561,7 +562,7 @@ func TestNormalizeSealPathRepoRootItself(t *testing.T) {
 }
 
 func TestReadSealStoreNotExist(t *testing.T) {
-	store, err := readSealStore(filepath.Join(t.TempDir(), "missing.json"))
+	store, err := seal.ReadStore(filepath.Join(t.TempDir(), "missing.json"))
 	if err != nil {
 		t.Fatalf("expected nil error for missing file, got %v", err)
 	}
@@ -575,7 +576,7 @@ func TestReadSealStoreCorrupt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "seals.json"), []byte("not-json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := readSealStore(filepath.Join(dir, "seals.json"))
+	_, err := seal.ReadStore(filepath.Join(dir, "seals.json"))
 	if err == nil {
 		t.Fatal("expected error for corrupt store, got nil")
 	}
@@ -599,7 +600,7 @@ func TestReadSealStoreRejectsSchemaViolations(t *testing.T) {
 			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := readSealStore(path); err == nil {
+			if _, err := seal.ReadStore(path); err == nil {
 				t.Fatalf("expected schema validation error for %s, got nil", name)
 			}
 		})
@@ -609,31 +610,31 @@ func TestReadSealStoreRejectsSchemaViolations(t *testing.T) {
 func TestDoctorSealStoreAcceptsMissingEmptyAndValidStores(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
-	storeFile, _, err := pathsSealStore(repo)
+	storeFile, _, err := seal.StorePaths(repo)
 	if err != nil {
 		t.Fatalf("pathsSealStore: %v", err)
 	}
 
-	if err := doctorSealStore(storeFile); err != nil {
+	if err := seal.DoctorStore(storeFile); err != nil {
 		t.Fatalf("doctor missing store: %v", err)
 	}
 	if _, err := os.Stat(storeFile); !os.IsNotExist(err) {
 		t.Fatalf("doctor should not create missing store (stat err: %v)", err)
 	}
 
-	if err := writeSealStore(storeFile, sealPathStore{Paths: map[string]sealEntry{}}); err != nil {
+	if err := seal.WriteStore(storeFile, seal.PathStore{Paths: map[string]seal.Entry{}}); err != nil {
 		t.Fatalf("write empty store: %v", err)
 	}
-	if err := doctorSealStore(storeFile); err != nil {
+	if err := seal.DoctorStore(storeFile); err != nil {
 		t.Fatalf("doctor empty store: %v", err)
 	}
 
-	if err := writeSealStore(storeFile, sealPathStore{
-		Paths: map[string]sealEntry{"src/a.go": {Key: "key1"}},
+	if err := seal.WriteStore(storeFile, seal.PathStore{
+		Paths: map[string]seal.Entry{"src/a.go": {Key: "key1"}},
 	}); err != nil {
 		t.Fatalf("write valid store: %v", err)
 	}
-	if err := doctorSealStore(storeFile); err != nil {
+	if err := seal.DoctorStore(storeFile); err != nil {
 		t.Fatalf("doctor valid store: %v", err)
 	}
 }
@@ -649,7 +650,7 @@ func TestDoctorSealStoreRejectsInvalidStoreStructure(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cli := newTestCLI(t)
 			repo := cli.initRepo(t)
-			storeFile, _, err := pathsSealStore(repo)
+			storeFile, _, err := seal.StorePaths(repo)
 			if err != nil {
 				t.Fatalf("pathsSealStore: %v", err)
 			}
@@ -660,7 +661,7 @@ func TestDoctorSealStoreRejectsInvalidStoreStructure(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := doctorSealStore(storeFile); err == nil {
+			if err := seal.DoctorStore(storeFile); err == nil {
 				t.Fatal("doctor invalid store error = nil, want error")
 			}
 		})
@@ -668,7 +669,7 @@ func TestDoctorSealStoreRejectsInvalidStoreStructure(t *testing.T) {
 }
 
 func TestDoctorSealStoreRejectsInvalidStoredPaths(t *testing.T) {
-	for name, paths := range map[string]map[string]sealEntry{
+	for name, paths := range map[string]map[string]seal.Entry{
 		"outside repo": {
 			"../outside.txt": {Key: "key1"},
 		},
@@ -693,7 +694,7 @@ func TestDoctorSealStoreRejectsInvalidStoredPaths(t *testing.T) {
 			repo := cli.initRepo(t)
 			storeFile := seedSealStore(t, repo, paths)
 
-			err := doctorSealStore(storeFile)
+			err := seal.DoctorStore(storeFile)
 			if err == nil {
 				t.Fatal("doctor invalid path error = nil, want error")
 			}
@@ -712,13 +713,13 @@ func TestDoctorSealStoreRejectsInvalidStoredPaths(t *testing.T) {
 func TestDoctorSealStoreReportsEveryViolation(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
-	storeFile := seedSealStore(t, repo, map[string]sealEntry{
+	storeFile := seedSealStore(t, repo, map[string]seal.Entry{
 		`bad\sep.go`:    {Key: "key1"}, // backslash separator
 		"../escape.txt": {Key: "key1"}, // escapes the repository root
 		"src/./b.go":    {Key: "key1"}, // not normalized
 	})
 
-	err := doctorSealStore(storeFile)
+	err := seal.DoctorStore(storeFile)
 	if err == nil {
 		t.Fatal("doctor error = nil, want error")
 	}
@@ -745,21 +746,21 @@ func TestCanonicalStoredSealPath(t *testing.T) {
 		{name: "canonical", rawPath: "src/./a.go", want: "src/a.go"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := canonicalStoredSealPath(tc.rawPath)
+			got, err := seal.CanonicalStoredPath(tc.rawPath)
 			if tc.wantError != "" {
 				if err == nil {
-					t.Fatalf("canonicalStoredSealPath(%q) error = nil, want %q", tc.rawPath, tc.wantError)
+					t.Fatalf("seal.CanonicalStoredPath(%q) error = nil, want %q", tc.rawPath, tc.wantError)
 				}
 				if !strings.Contains(err.Error(), tc.wantError) {
-					t.Fatalf("canonicalStoredSealPath(%q) error = %q, want it to contain %q", tc.rawPath, err.Error(), tc.wantError)
+					t.Fatalf("seal.CanonicalStoredPath(%q) error = %q, want it to contain %q", tc.rawPath, err.Error(), tc.wantError)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("canonicalStoredSealPath(%q) error = %v, want nil", tc.rawPath, err)
+				t.Fatalf("seal.CanonicalStoredPath(%q) error = %v, want nil", tc.rawPath, err)
 			}
 			if got != tc.want {
-				t.Fatalf("canonicalStoredSealPath(%q) = %q, want %q", tc.rawPath, got, tc.want)
+				t.Fatalf("seal.CanonicalStoredPath(%q) = %q, want %q", tc.rawPath, got, tc.want)
 			}
 		})
 	}
@@ -777,7 +778,7 @@ func TestCmdSealDoctorOutsideRepoFails(t *testing.T) {
 func TestCmdSealDoctorReturnsExitCode7ForIntegrityFailures(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
-	seedSealStore(t, repo, map[string]sealEntry{
+	seedSealStore(t, repo, map[string]seal.Entry{
 		`src\a.go`: {Key: "key1"},
 	})
 
@@ -802,8 +803,8 @@ func TestWriteSealStoreRejectsSchemaViolations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "paths.json")
 	// An empty key violates the schema's minLength constraint; the write
 	// must be refused and nothing persisted.
-	err := writeSealStore(path, sealPathStore{
-		Paths: map[string]sealEntry{"src/a.go": {Key: ""}},
+	err := seal.WriteStore(path, seal.PathStore{
+		Paths: map[string]seal.Entry{"src/a.go": {Key: ""}},
 	})
 	if err == nil {
 		t.Fatal("expected schema validation error, got nil")
@@ -815,10 +816,10 @@ func TestWriteSealStoreRejectsSchemaViolations(t *testing.T) {
 
 func TestWriteSealStoreNormalizesNilPaths(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "paths.json")
-	if err := writeSealStore(path, sealPathStore{}); err != nil {
+	if err := seal.WriteStore(path, seal.PathStore{}); err != nil {
 		t.Fatalf("write with nil Paths should normalize to empty map: %v", err)
 	}
-	got, err := readSealStore(path)
+	got, err := seal.ReadStore(path)
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
@@ -840,7 +841,7 @@ func TestReadSealStoreUnreadable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = os.Chmod(storePath, 0o644) }()
-	_, err := readSealStore(storePath)
+	_, err := seal.ReadStore(storePath)
 	if err == nil {
 		t.Fatal("expected error for unreadable file, got nil")
 	}
@@ -849,16 +850,16 @@ func TestReadSealStoreUnreadable(t *testing.T) {
 func TestWriteReadSealStoreRoundtrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "paths.json")
-	original := sealPathStore{
-		Paths: map[string]sealEntry{
+	original := seal.PathStore{
+		Paths: map[string]seal.Entry{
 			"src/a.go":      {Key: "key1"},
 			"internal/b.go": {Key: "key2"},
 		},
 	}
-	if err := writeSealStore(path, original); err != nil {
+	if err := seal.WriteStore(path, original); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	got, err := readSealStore(path)
+	got, err := seal.ReadStore(path)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -868,8 +869,8 @@ func TestWriteReadSealStoreRoundtrip(t *testing.T) {
 	if got.Paths["src/a.go"].Key != "key1" || got.Paths["internal/b.go"].Key != "key2" {
 		t.Fatalf("round-trip content mismatch: got %+v", got.Paths)
 	}
-	if got.SchemaVersion != sealPathSchemaVersion {
-		t.Fatalf("schema version: got %d, want %d", got.SchemaVersion, sealPathSchemaVersion)
+	if got.SchemaVersion != seal.SchemaVersion {
+		t.Fatalf("schema version: got %d, want %d", got.SchemaVersion, seal.SchemaVersion)
 	}
 }
 
@@ -885,12 +886,12 @@ func readFileString(t *testing.T, path string) string {
 func TestWrittenSealStoreConformsToSchema(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "paths.json")
-	store := sealPathStore{
-		Paths: map[string]sealEntry{
+	store := seal.PathStore{
+		Paths: map[string]seal.Entry{
 			"src/a.go": {Key: "key1"},
 		},
 	}
-	if err := writeSealStore(path, store); err != nil {
+	if err := seal.WriteStore(path, store); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -922,14 +923,14 @@ func TestWriteSealStoreMkdirAllFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "not-a-dir"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := writeSealStore(filepath.Join(dir, "not-a-dir", "paths.json"), sealPathStore{Paths: map[string]sealEntry{}})
+	err := seal.WriteStore(filepath.Join(dir, "not-a-dir", "paths.json"), seal.PathStore{Paths: map[string]seal.Entry{}})
 	if err == nil {
 		t.Fatal("expected error when MkdirAll cannot create dir, got nil")
 	}
 }
 
 func TestPathsSealStoreOutsideRepo(t *testing.T) {
-	_, _, err := pathsSealStore(t.TempDir())
+	_, _, err := seal.StorePaths(t.TempDir())
 	if err == nil {
 		t.Fatal("pathsSealStore outside git repo: error = nil, want error")
 	}
@@ -960,7 +961,7 @@ func TestAcquireSealLockBasic(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, "paths.lock")
 
-	release, err := acquireSealLock(lockPath, defaultSealLockTimeout)
+	release, err := seal.AcquireLock(lockPath, seal.DefaultLockTimeout)
 	if err != nil {
 		t.Fatalf("acquireSealLock: %v", err)
 	}
@@ -986,13 +987,13 @@ func TestAcquireSealLockTimeout(t *testing.T) {
 	defer func() { _ = os.Remove(lockPath) }()
 
 	// Use a short timeout for the test.
-	_, err = acquireSealLock(lockPath, 150*time.Millisecond)
+	_, err = seal.AcquireLock(lockPath, 150*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected lock-timeout error, got nil")
 	}
-	var xe *exitError
-	if !errors.As(err, &xe) || xe.code != exitSealLockTimeout {
-		t.Fatalf("expected exitError with code %d, got: %v", exitSealLockTimeout, err)
+	var lte seal.LockTimeoutErr
+	if !errors.As(err, &lte) {
+		t.Fatalf("expected LockTimeoutErr, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "seal-lock-timeout:") {
 		t.Fatalf("expected 'seal-lock-timeout:' prefix in error: %s", err.Error())
@@ -1015,17 +1016,17 @@ func TestAcquireSealLockZeroTimeoutTriesOnce(t *testing.T) {
 	defer func() { _ = os.Remove(lockPath) }()
 
 	start := time.Now()
-	_, err = acquireSealLock(lockPath, 0)
+	_, err = seal.AcquireLock(lockPath, 0)
 	if err == nil {
 		t.Fatal("expected lock-timeout error, got nil")
 	}
 	// A single attempt must not sleep for a retry interval.
-	if elapsed := time.Since(start); elapsed >= sealStoreLockInterval {
+	if elapsed := time.Since(start); elapsed >= seal.LockInterval {
 		t.Fatalf("zero timeout retried instead of failing immediately: took %s", elapsed)
 	}
-	var xe *exitError
-	if !errors.As(err, &xe) || xe.code != exitSealLockTimeout {
-		t.Fatalf("expected exitError with code %d, got: %v", exitSealLockTimeout, err)
+	var lte seal.LockTimeoutErr
+	if !errors.As(err, &lte) {
+		t.Fatalf("expected LockTimeoutErr, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "seal-lock-timeout:") {
 		t.Fatalf("expected 'seal-lock-timeout:' prefix in error: %s", err.Error())
@@ -1038,7 +1039,7 @@ func TestAcquireSealLockZeroTimeoutSucceedsWhenFree(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, "paths.lock")
 
-	release, err := acquireSealLock(lockPath, 0)
+	release, err := seal.AcquireLock(lockPath, 0)
 	if err != nil {
 		t.Fatalf("acquireSealLock with free lock and zero timeout: %v", err)
 	}
@@ -1048,12 +1049,12 @@ func TestAcquireSealLockZeroTimeoutSucceedsWhenFree(t *testing.T) {
 func TestResolveSealLockTimeout(t *testing.T) {
 	t.Run("unset uses default", func(t *testing.T) {
 		repo := newTestCLI(t).initRepo(t)
-		got, err := resolveSealLockTimeout(repo)
+		got, err := seal.ResolveLockTimeout(repo)
 		if err != nil {
 			t.Fatalf("resolveSealLockTimeout: %v", err)
 		}
-		if got != defaultSealLockTimeout {
-			t.Fatalf("got %s, want default %s", got, defaultSealLockTimeout)
+		if got != seal.DefaultLockTimeout {
+			t.Fatalf("got %s, want default %s", got, seal.DefaultLockTimeout)
 		}
 	})
 
@@ -1065,10 +1066,10 @@ func TestResolveSealLockTimeout(t *testing.T) {
 		}
 		for value, want := range cases {
 			repo := newTestCLI(t).initRepo(t)
-			git(t, repo, "config", sealLockTimeoutConfigKey, value)
-			got, err := resolveSealLockTimeout(repo)
+			git(t, repo, "config", seal.LockTimeoutConfigKey, value)
+			got, err := seal.ResolveLockTimeout(repo)
 			if err != nil {
-				t.Fatalf("resolveSealLockTimeout(%q): %v", value, err)
+				t.Fatalf("seal.ResolveLockTimeout(%q): %v", value, err)
 			}
 			if got != want {
 				t.Fatalf("value %q: got %s, want %s", value, got, want)
@@ -1078,29 +1079,29 @@ func TestResolveSealLockTimeout(t *testing.T) {
 
 	t.Run("the cap itself is accepted", func(t *testing.T) {
 		repo := newTestCLI(t).initRepo(t)
-		git(t, repo, "config", sealLockTimeoutConfigKey, strconv.FormatInt(maxSealLockTimeoutMs, 10))
-		got, err := resolveSealLockTimeout(repo)
+		git(t, repo, "config", seal.LockTimeoutConfigKey, strconv.FormatInt(seal.MaxLockTimeoutMs, 10))
+		got, err := seal.ResolveLockTimeout(repo)
 		if err != nil {
 			t.Fatalf("resolveSealLockTimeout at cap: %v", err)
 		}
-		if got != maxSealLockTimeout {
-			t.Fatalf("got %s, want %s", got, maxSealLockTimeout)
+		if got != seal.MaxLockTimeout {
+			t.Fatalf("got %s, want %s", got, seal.MaxLockTimeout)
 		}
 	})
 
 	t.Run("values above the cap are rejected", func(t *testing.T) {
 		for _, value := range []string{
-			strconv.FormatInt(maxSealLockTimeoutMs+1, 10), // just over the cap
+			strconv.FormatInt(seal.MaxLockTimeoutMs+1, 10), // just over the cap
 			"9223372036855",              // parses as int64 but overflows when multiplied
 			"99999999999999999999999999", // too large to fit in int64
 		} {
 			repo := newTestCLI(t).initRepo(t)
-			git(t, repo, "config", sealLockTimeoutConfigKey, value)
-			_, err := resolveSealLockTimeout(repo)
+			git(t, repo, "config", seal.LockTimeoutConfigKey, value)
+			_, err := seal.ResolveLockTimeout(repo)
 			if err == nil {
 				t.Fatalf("value %q: expected error, got nil", value)
 			}
-			if !strings.Contains(err.Error(), sealLockTimeoutConfigKey) {
+			if !strings.Contains(err.Error(), seal.LockTimeoutConfigKey) {
 				t.Fatalf("value %q: error should name the config key, got: %v", value, err)
 			}
 		}
@@ -1110,7 +1111,7 @@ func TestResolveSealLockTimeout(t *testing.T) {
 		repo := newTestCLI(t).initRepo(t)
 		// A non-existent working directory makes git fail to run; the error must
 		// surface rather than being swallowed as an unset key.
-		_, err := resolveSealLockTimeout(filepath.Join(repo, "does-not-exist"))
+		_, err := seal.ResolveLockTimeout(filepath.Join(repo, "does-not-exist"))
 		if err == nil {
 			t.Fatal("expected error when git config cannot run, got nil")
 		}
@@ -1121,12 +1122,12 @@ func TestResolveSealLockTimeout(t *testing.T) {
 			repo := newTestCLI(t).initRepo(t)
 			// git config preserves the value (including leading/trailing
 			// whitespace and the empty string) exactly when set via the CLI.
-			git(t, repo, "config", sealLockTimeoutConfigKey, value)
-			_, err := resolveSealLockTimeout(repo)
+			git(t, repo, "config", seal.LockTimeoutConfigKey, value)
+			_, err := seal.ResolveLockTimeout(repo)
 			if err == nil {
 				t.Fatalf("value %q: expected error, got nil", value)
 			}
-			if !strings.Contains(err.Error(), sealLockTimeoutConfigKey) {
+			if !strings.Contains(err.Error(), seal.LockTimeoutConfigKey) {
 				t.Fatalf("value %q: error should name the config key, got: %v", value, err)
 			}
 		}
@@ -1149,7 +1150,7 @@ func TestAcquireSealLockUnwritableDir(t *testing.T) {
 	}
 	defer func() { _ = os.Chmod(dir, 0o755) }()
 
-	_, err := acquireSealLock(filepath.Join(dir, "paths.lock"), defaultSealLockTimeout)
+	_, err := seal.AcquireLock(filepath.Join(dir, "paths.lock"), seal.DefaultLockTimeout)
 	if err == nil {
 		t.Fatal("expected error creating lock in unwritable dir, got nil")
 	}
@@ -1175,7 +1176,7 @@ func TestWriteSealStoreUnwritableDir(t *testing.T) {
 	}
 	defer func() { _ = os.Chmod(dir, 0o755) }()
 
-	err := writeSealStore(filepath.Join(dir, "paths.json"), sealPathStore{Paths: map[string]sealEntry{}})
+	err := seal.WriteStore(filepath.Join(dir, "paths.json"), seal.PathStore{Paths: map[string]seal.Entry{}})
 	if err == nil {
 		t.Fatal("expected error writing store in unwritable dir, got nil")
 	}
@@ -1191,7 +1192,7 @@ func TestSealLockReleaseReportsRemoveFailure(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "seals")
 	lockPath := filepath.Join(dir, "paths.lock")
 
-	release, err := acquireSealLock(lockPath, defaultSealLockTimeout)
+	release, err := seal.AcquireLock(lockPath, seal.DefaultLockTimeout)
 	if err != nil {
 		t.Fatalf("acquireSealLock: %v", err)
 	}
@@ -1806,7 +1807,7 @@ func TestCmdSealTestDoesNotMutateStoreInProcess(t *testing.T) {
 	})
 
 	// seal test is read-only: it must not create the store file.
-	storeFile, _, err := pathsSealStore(repo)
+	storeFile, _, err := seal.StorePaths(repo)
 	if err != nil {
 		t.Fatalf("pathsSealStore: %v", err)
 	}
@@ -2077,10 +2078,10 @@ func TestRunLsJSONInProcess(t *testing.T) {
 
 func TestSealTestDataRenderHumanPrintsConflicts(t *testing.T) {
 	claimedBy := "key2"
-	data := sealTestData{
+	data := seal.TestResult{
 		CurrentKey: "key1",
 		Passed:     false,
-		Results: []sealTestResultItem{
+		Results: []seal.TestResultItem{
 			{Path: "safe.go", Status: "claimed-by-current-key", Safe: true, ClaimedBy: &claimedBy},
 			{Path: "conflict.go", Status: "claimed-by-other-key", Safe: false, ClaimedBy: &claimedBy},
 			{Path: "free.go", Status: "unclaimed", Safe: true},
@@ -2100,10 +2101,10 @@ func TestSealTestDataRenderHumanPrintsConflicts(t *testing.T) {
 }
 
 func TestSealDoctorDataRenderHumanEmitsFindings(t *testing.T) {
-	data := sealDoctorData{
+	data := seal.DoctorResult{
 		Healthy:  false,
-		Summary:  sealDoctorSummary{CheckedClaims: 1, ErrorCount: 1},
-		Findings: []sealDoctorFinding{{Severity: "error", Code: "invalid-stored-path", Message: "bad path"}},
+		Summary:  seal.DoctorSummary{CheckedClaims: 1, ErrorCount: 1},
+		Findings: []seal.DoctorFinding{{Severity: "error", Code: "invalid-stored-path", Message: "bad path"}},
 	}
 	var sb strings.Builder
 	if err := data.RenderHuman(&sb); err != nil {
@@ -2111,10 +2112,10 @@ func TestSealDoctorDataRenderHumanEmitsFindings(t *testing.T) {
 	}
 	got := sb.String()
 	if !strings.Contains(got, "seal-doctor-error:") {
-		t.Fatalf("sealDoctorData.RenderHuman should emit seal-doctor-error: token, got: %q", got)
+		t.Fatalf("seal.DoctorResult.RenderHuman should emit seal-doctor-error: token, got: %q", got)
 	}
 	if !strings.Contains(got, "bad path") {
-		t.Fatalf("sealDoctorData.RenderHuman should emit finding message, got: %q", got)
+		t.Fatalf("seal.DoctorResult.RenderHuman should emit finding message, got: %q", got)
 	}
 }
 
@@ -2288,7 +2289,7 @@ func TestCmdSealDoctorJSONHealthyInProcess(t *testing.T) {
 func TestCmdSealDoctorJSONIntegrityViolationInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
-	seedSealStore(t, repo, map[string]sealEntry{
+	seedSealStore(t, repo, map[string]seal.Entry{
 		`src/./a.go`: {Key: "key1"},
 	})
 
@@ -2314,7 +2315,7 @@ func TestCmdSealDoctorJSONIntegrityViolationInProcess(t *testing.T) {
 func TestCmdSealDoctorJSONMalformedStoreInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
-	storeFile, _, err := pathsSealStore(repo)
+	storeFile, _, err := seal.StorePaths(repo)
 	if err != nil {
 		t.Fatalf("pathsSealStore: %v", err)
 	}
@@ -2536,16 +2537,16 @@ func TestWorktreeJSONRenderHuman(t *testing.T) {
 }
 
 func TestSealClaimDataRenderHuman(t *testing.T) {
-	d := sealClaimData{}
+	d := seal.ClaimResult{}
 	if err := d.RenderHuman(nil); err != nil {
-		t.Fatalf("sealClaimData.RenderHuman: %v", err)
+		t.Fatalf("seal.ClaimResult.RenderHuman: %v", err)
 	}
 }
 
 func TestSealUnclaimDataRenderHuman(t *testing.T) {
-	d := sealUnclaimData{}
+	d := seal.UnclaimResult{}
 	if err := d.RenderHuman(nil); err != nil {
-		t.Fatalf("sealUnclaimData.RenderHuman: %v", err)
+		t.Fatalf("seal.UnclaimResult.RenderHuman: %v", err)
 	}
 }
 
@@ -2665,19 +2666,19 @@ func TestSealUnclaimStoreFailJSON(t *testing.T) {
 }
 
 // TestSealStoreValidationErrInterface verifies the Error() and Unwrap() methods
-// on sealStoreValidationErr satisfy the standard error interface.
+// on seal.StoreValidationErr satisfy the standard error interface.
 func TestSealStoreValidationErrInterface(t *testing.T) {
 	cause := fmt.Errorf("schema error")
-	e := sealStoreValidationErr{cause: cause}
+	e := seal.StoreValidationErr{Cause: cause}
 	if e.Error() != cause.Error() {
 		t.Fatalf("Error() = %q, want %q", e.Error(), cause.Error())
 	}
 	if e.Unwrap() != cause {
 		t.Fatalf("Unwrap() = %v, want %v", e.Unwrap(), cause)
 	}
-	var target sealStoreValidationErr
+	var target seal.StoreValidationErr
 	if !errors.As(e, &target) {
-		t.Fatal("errors.As should match sealStoreValidationErr")
+		t.Fatal("errors.As should match seal.StoreValidationErr")
 	}
 }
 
@@ -2688,7 +2689,7 @@ func TestCmdSealClaimValidateStoreInProcess(t *testing.T) {
 	repo := cli.initRepo(t)
 	wt := openManagedWorktree(t, repo, "key1")
 
-	storeFile, _, err := pathsSealStore(repo)
+	storeFile, _, err := seal.StorePaths(repo)
 	if err != nil {
 		t.Fatalf("pathsSealStore: %v", err)
 	}
@@ -2720,7 +2721,7 @@ func TestCmdSealUnclaimValidateStoreInProcess(t *testing.T) {
 	repo := cli.initRepo(t)
 	wt := openManagedWorktree(t, repo, "key1")
 
-	storeFile, _, err := pathsSealStore(repo)
+	storeFile, _, err := seal.StorePaths(repo)
 	if err != nil {
 		t.Fatalf("pathsSealStore: %v", err)
 	}
@@ -2853,9 +2854,9 @@ func TestLsDataRenderHumanWriteError(t *testing.T) {
 }
 
 // TestSealLsDataRenderHumanWriteError exercises the error return path of
-// sealLsData.RenderHuman when the underlying writer fails.
+// seal.LsResult.RenderHuman when the underlying writer fails.
 func TestSealLsDataRenderHumanWriteError(t *testing.T) {
-	d := sealLsData{Claims: []sealLsClaim{{Key: "k", Path: "p"}}}
+	d := seal.LsResult{Claims: []seal.LsClaim{{Key: "k", Path: "p"}}}
 	err := d.RenderHuman(errWriter{err: fmt.Errorf("write failed")})
 	if err == nil {
 		t.Fatal("expected write error, got nil")
@@ -2863,12 +2864,12 @@ func TestSealLsDataRenderHumanWriteError(t *testing.T) {
 }
 
 // TestSealTestDataRenderHumanWriteError exercises the error return path of
-// sealTestData.RenderHuman when the underlying writer fails.
+// seal.TestResult.RenderHuman when the underlying writer fails.
 func TestSealTestDataRenderHumanWriteError(t *testing.T) {
 	owner := "other"
-	d := sealTestData{
+	d := seal.TestResult{
 		CurrentKey: "mine",
-		Results: []sealTestResultItem{
+		Results: []seal.TestResultItem{
 			{Path: "foo.ts", Status: "claimed-by-other-key", Safe: false, ClaimedBy: &owner},
 		},
 	}

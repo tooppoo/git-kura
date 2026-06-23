@@ -4,13 +4,12 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
-	"sort"
 	"strings"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tooppoo/git-kura/internal/gitutil"
 	"github.com/tooppoo/git-kura/internal/output"
+	"github.com/tooppoo/git-kura/internal/seal"
 )
 
 //go:embed schema/commands/seal_ls.schema.json
@@ -156,190 +155,6 @@ func (o sealUnclaimOptions) renderMode() output.RenderMode {
 		return output.RenderJSON
 	}
 	return output.RenderHuman
-}
-
-// sealClaimPathItem is one path's result in the seal claim success data.
-type sealClaimPathItem struct {
-	Path   string `json:"path"`
-	Status string `json:"status"` // "claimed" or "already-owned"
-}
-
-// sealClaimData is the structured success payload for seal claim --json.
-type sealClaimData struct {
-	CurrentKey string              `json:"currentKey"`
-	Paths      []sealClaimPathItem `json:"paths"`
-}
-
-func (d sealClaimData) RenderHuman(w io.Writer) error {
-	for _, p := range d.Paths {
-		label := p.Status
-		if p.Status == "already-owned" {
-			label = "already owned"
-		}
-		if _, err := fmt.Fprintf(w, "%s: %s\n", label, p.Path); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// sealUnclaimPathItem is one path's result in the seal unclaim success data.
-type sealUnclaimPathItem struct {
-	Path   string `json:"path"`
-	Status string `json:"status"` // "released" or "not-claimed"
-}
-
-// sealUnclaimData is the structured success payload for seal unclaim --json.
-type sealUnclaimData struct {
-	CurrentKey string                `json:"currentKey"`
-	Paths      []sealUnclaimPathItem `json:"paths"`
-}
-
-func (d sealUnclaimData) RenderHuman(w io.Writer) error {
-	for _, p := range d.Paths {
-		label := p.Status
-		if p.Status == "not-claimed" {
-			label = "not claimed"
-		}
-		if _, err := fmt.Fprintf(w, "%s: %s\n", label, p.Path); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// sealMutationPathItem is one path item in seal mutation error details.
-// Status values for claim errors: "would-claim", "already-owned", "owned-by-other",
-// "duplicate", "invalid-path", "outside-repository".
-// Status values for unclaim errors: "would-release", "not-claimed", "owned-by-other",
-// "duplicate", "invalid-path", "outside-repository".
-type sealMutationPathItem struct {
-	Path        string `json:"path"`
-	Status      string `json:"status"`
-	OwnerKey    string `json:"ownerKey,omitempty"`
-	DuplicateOf *int   `json:"duplicateOf,omitempty"`
-}
-
-// sealMutationErrorDetails is the error.details payload for seal claim/unclaim
-// failures. Preflight failures populate Phase, CurrentKey, Paths, Conflicts,
-// and Duplicates. Store-level failures populate Phase and StoreError only.
-type sealMutationErrorDetails struct {
-	Phase      string                 `json:"phase,omitempty"`
-	CurrentKey string                 `json:"currentKey,omitempty"`
-	Paths      []sealMutationPathItem `json:"paths,omitempty"`
-	Conflicts  []sealConflictItem     `json:"conflicts,omitempty"`
-	Duplicates []sealDuplicateItem    `json:"duplicates,omitempty"`
-	StoreError *sealStoreError        `json:"storeError,omitempty"`
-}
-
-// sealConflictItem describes a single ownership conflict in error.details.conflicts[].
-type sealConflictItem struct {
-	Path         string `json:"path"`
-	OwnerKey     string `json:"ownerKey"`
-	RequestedKey string `json:"requestedKey"`
-}
-
-// sealDuplicateItem describes a duplicate normalized path in error.details.duplicates[].
-type sealDuplicateItem struct {
-	Path           string `json:"path"`
-	FirstIndex     int    `json:"firstIndex"`
-	DuplicateIndex int    `json:"duplicateIndex"`
-}
-
-// sealStoreError describes a store-wide failure in error.details.storeError.
-// It is required when phase is read-store, validate-store, or write-store.
-type sealStoreError struct {
-	Status string `json:"status"`
-	Path   string `json:"path,omitempty"`
-}
-
-// sealLsClaim is one entry in the seal ls JSON output.
-type sealLsClaim struct {
-	Key  string `json:"key"`
-	Path string `json:"path"`
-}
-
-// sealLsData is the structured success payload for seal ls --json.
-type sealLsData struct {
-	FilterKey *string       `json:"filterKey"`
-	Claims    []sealLsClaim `json:"claims"`
-}
-
-func (d sealLsData) RenderHuman(w io.Writer) error {
-	for _, c := range d.Claims {
-		if _, err := fmt.Fprintf(w, "%s\t%s\n", c.Key, c.Path); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// sealTestResultItem is one path's inspection result in the seal test output.
-type sealTestResultItem struct {
-	Path      string  `json:"path"`
-	Status    string  `json:"status"`
-	Safe      bool    `json:"safe"`
-	ClaimedBy *string `json:"claimedBy"`
-}
-
-// sealTestData is the structured success payload for seal test --json.
-type sealTestData struct {
-	CurrentKey string               `json:"currentKey"`
-	Passed     bool                 `json:"passed"`
-	Results    []sealTestResultItem `json:"results"`
-}
-
-func (d sealTestData) RenderHuman(w io.Writer) error {
-	// Human mode: emit one line per conflict so the user can see every blocked path.
-	// Uses the canonical "seal-conflict:" token, consistent with claim/unclaim errors.
-	for _, r := range d.Results {
-		if r.Status == "claimed-by-other-key" {
-			if _, err := fmt.Fprintf(w, "seal-conflict: path %q is already claimed by key %q\n", r.Path, *r.ClaimedBy); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// sealDoctorFinding is one integrity finding from seal doctor.
-type sealDoctorFinding struct {
-	Severity string  `json:"severity"`
-	Code     string  `json:"code"`
-	Path     *string `json:"path"`
-	Message  string  `json:"message"`
-}
-
-// sealDoctorSummary aggregates counts from a seal doctor inspection.
-type sealDoctorSummary struct {
-	CheckedClaims int `json:"checkedClaims"`
-	ErrorCount    int `json:"errorCount"`
-	WarningCount  int `json:"warningCount"`
-}
-
-// sealDoctorData is the structured success payload for seal doctor --json.
-type sealDoctorData struct {
-	Healthy  bool                `json:"healthy"`
-	Summary  sealDoctorSummary   `json:"summary"`
-	Findings []sealDoctorFinding `json:"findings"`
-}
-
-func (d sealDoctorData) RenderHuman(w io.Writer) error {
-	// Healthy: no output. Unhealthy: one line per finding with the stable token.
-	for _, f := range d.Findings {
-		if _, err := fmt.Fprintf(w, "seal-doctor-error: %s\n", f.Message); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// currentKeyUnresolvedDetails is the error.details payload when current key
-// resolution fails for seal test --json.
-type currentKeyUnresolvedDetails struct {
-	Reason         string  `json:"reason"`
-	RepositoryRoot *string `json:"repositoryRoot"`
-	MetadataPath   *string `json:"metadataPath"`
 }
 
 const sealHelp = `Usage: git kura seal <subcommand> [args]
@@ -708,51 +523,16 @@ func parseSealLsArgs(args []string) (sealLsOptions, error) {
 }
 
 // cmdSealLs lists claimed paths from the path seal store. An empty
-// opts.FilterKey lists every key. Per
-// docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md,
-// ls is always repository-wide: its scope must not depend on the caller's
-// current worktree. It also reads the store without acquiring paths.lock,
-// so a held lock never blocks listing.
+// opts.FilterKey lists every key. It is repository-wide and read-only.
 func cmdSealLs(opts sealLsOptions) error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
 		return sealLsFail(opts, fmt.Errorf("not inside a git repository"))
 	}
-	storeFile, _, err := pathsSealStore(repoRoot)
+	data, err := seal.Ls(seal.LsInput{RepoRoot: repoRoot, FilterKey: opts.FilterKey})
 	if err != nil {
 		return sealLsFail(opts, err)
 	}
-	store, err := readSealStore(storeFile)
-	if err != nil {
-		return sealLsFail(opts, err)
-	}
-
-	rawPaths := make([]string, 0, len(store.Paths))
-	for p, entry := range store.Paths {
-		if opts.FilterKey != "" && entry.Key != opts.FilterKey {
-			continue
-		}
-		rawPaths = append(rawPaths, p)
-	}
-	sort.Slice(rawPaths, func(i, j int) bool {
-		ki, kj := store.Paths[rawPaths[i]].Key, store.Paths[rawPaths[j]].Key
-		if ki != kj {
-			return ki < kj
-		}
-		return rawPaths[i] < rawPaths[j]
-	})
-
-	claims := make([]sealLsClaim, len(rawPaths))
-	for i, p := range rawPaths {
-		claims[i] = sealLsClaim{Key: store.Paths[p].Key, Path: p}
-	}
-
-	var filterKey *string
-	if opts.FilterKey != "" {
-		k := opts.FilterKey
-		filterKey = &k
-	}
-	data := sealLsData{FilterKey: filterKey, Claims: claims}
 
 	mode := opts.renderMode()
 	if mode != output.RenderHuman {
@@ -763,8 +543,7 @@ func cmdSealLs(opts sealLsOptions) error {
 	return emitResult(mode, output.Result{Command: output.CommandSealLs, Data: data})
 }
 
-// sealLsFail routes a seal ls failure to the right output. JSON/TOON requests
-// render an ok:false envelope on stdout; plain requests keep existing behavior.
+// sealLsFail routes a seal ls failure to the right output.
 func sealLsFail(opts sealLsOptions, err error) error {
 	mode := opts.renderMode()
 	if mode == output.RenderHuman {
@@ -773,47 +552,17 @@ func sealLsFail(opts sealLsOptions, err error) error {
 	return emitError(mode, toCommandError(output.CommandSealLs, err))
 }
 
-// cmdSealDoctor validates the whole path seal store for the current Git
-// repository. It is repository-wide and read-only: it does not derive a current
-// key, inspect git-kura worktree metadata, or acquire paths.lock.
+// cmdSealDoctor validates the whole path seal store for the current Git repository.
+// It is repository-wide and read-only.
 func cmdSealDoctor(opts sealDoctorOptions) error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
 		return sealDoctorFail(opts, fmt.Errorf("not inside a git repository"))
 	}
-	storeFile, _, err := pathsSealStore(repoRoot)
+	data, err := seal.Doctor(seal.DoctorInput{RepoRoot: repoRoot})
 	if err != nil {
-		return sealDoctorFail(opts, err)
-	}
-
-	inspection, err := inspectSealStore(storeFile)
-	if err != nil {
-		// Store could not be read/parsed: execution failure.
 		doctorErr := exitCodeError(exitSealDoctorError, fmt.Errorf("seal-doctor-error: %w", err))
 		return sealDoctorFail(opts, doctorErr)
-	}
-
-	errorCount := 0
-	warningCount := 0
-	for _, f := range inspection.findings {
-		if f.Severity == "error" {
-			errorCount++
-		} else {
-			warningCount++
-		}
-	}
-	findings := inspection.findings
-	if findings == nil {
-		findings = []sealDoctorFinding{}
-	}
-	data := sealDoctorData{
-		Healthy: len(inspection.findings) == 0,
-		Summary: sealDoctorSummary{
-			CheckedClaims: inspection.checkedClaims,
-			ErrorCount:    errorCount,
-			WarningCount:  warningCount,
-		},
-		Findings: findings,
 	}
 
 	mode := opts.renderMode()
@@ -830,8 +579,6 @@ func cmdSealDoctor(opts sealDoctorOptions) error {
 		return nil
 	}
 
-	// Human mode: route through the framework so JSON/TOON and human render the same data.
-	// Unhealthy findings go to stdout as a business result (ok:true, healthy:false).
 	if err := emitResult(output.RenderHuman, output.Result{Command: output.CommandSealDoctor, Data: data}); err != nil {
 		return err
 	}
@@ -841,9 +588,7 @@ func cmdSealDoctor(opts sealDoctorOptions) error {
 	return nil
 }
 
-// sealDoctorFail routes a seal doctor failure to the right output. JSON/TOON
-// requests render an ok:false envelope on stdout; plain requests keep the
-// existing error behavior.
+// sealDoctorFail routes a seal doctor failure to the right output.
 func sealDoctorFail(opts sealDoctorOptions, err error) error {
 	mode := opts.renderMode()
 	if mode == output.RenderHuman {
