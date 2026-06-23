@@ -968,7 +968,9 @@ func TestAcquireSealLockBasic(t *testing.T) {
 	if _, err := os.Stat(lockPath); err != nil {
 		t.Fatalf("lock file should exist: %v", err)
 	}
-	release()
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
 	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
 		t.Fatal("lock file should be removed after release")
 	}
@@ -1043,7 +1045,9 @@ func TestAcquireSealLockZeroTimeoutSucceedsWhenFree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquireSealLock with free lock and zero timeout: %v", err)
 	}
-	release()
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
 }
 
 func TestResolveSealLockTimeout(t *testing.T) {
@@ -1203,7 +1207,9 @@ func TestSealLockReleaseReportsRemoveFailure(t *testing.T) {
 	}
 	defer func() { _ = os.Chmod(dir, 0o755) }()
 
-	release() // must not panic; reports the failure on stderr
+	if err := release(); err == nil {
+		t.Fatal("expected release error on unwritable directory, got nil")
+	}
 
 	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatal(err)

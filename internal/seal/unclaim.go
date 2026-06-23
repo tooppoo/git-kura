@@ -16,30 +16,36 @@ type UnclaimInput struct {
 
 // Unclaim releases the current key's claim on one or more paths in the seal store.
 // Returns ConflictErr when paths fail preflight, StoreErr for store failures,
-// LockTimeoutErr when the lock cannot be acquired.
-func Unclaim(input UnclaimInput) (UnclaimResult, error) {
-	storeFile, lockFile, err := StorePaths(input.RepoRoot)
-	if err != nil {
-		return UnclaimResult{}, fmt.Errorf("resolve seal store path: %w", err)
+// LockTimeoutErr when the lock cannot be acquired. On success, warnings holds
+// any non-fatal lock-release message the caller should surface to the user.
+func Unclaim(input UnclaimInput) (result UnclaimResult, warnings []string, err error) {
+	storeFile, lockFile, pathErr := StorePaths(input.RepoRoot)
+	if pathErr != nil {
+		return UnclaimResult{}, nil, fmt.Errorf("resolve seal store path: %w", pathErr)
 	}
 
-	timeout, err := ResolveLockTimeout(input.RepoRoot)
-	if err != nil {
-		return UnclaimResult{}, err
+	timeout, timeoutErr := ResolveLockTimeout(input.RepoRoot)
+	if timeoutErr != nil {
+		return UnclaimResult{}, nil, timeoutErr
 	}
-	release, err := AcquireLock(lockFile, timeout)
-	if err != nil {
-		return UnclaimResult{}, err
+	release, lockErr := AcquireLock(lockFile, timeout)
+	if lockErr != nil {
+		return UnclaimResult{}, nil, lockErr
 	}
-	defer release()
+	defer func() {
+		if releaseErr := release(); releaseErr != nil && err == nil {
+			warnings = append(warnings, releaseErr.Error())
+		}
+	}()
 
-	store, err := ReadStore(storeFile)
-	if err != nil {
+	store, storeErr := ReadStore(storeFile)
+	if storeErr != nil {
 		phase := "read-store"
-		if errors.As(err, new(StoreValidationErr)) {
+		if errors.As(storeErr, new(StoreValidationErr)) {
 			phase = "validate-store"
 		}
-		return UnclaimResult{}, StoreErr{Phase: phase, StorePath: storeFile, Cause: err}
+		err = StoreErr{Phase: phase, StorePath: storeFile, Cause: storeErr}
+		return
 	}
 
 	type pathResult struct {
@@ -138,13 +144,14 @@ func Unclaim(input UnclaimInput) (UnclaimResult, error) {
 				})
 			}
 		}
-		return UnclaimResult{}, ConflictErr{
+		err = ConflictErr{
 			Phase:      "preflight",
 			CurrentKey: input.CurrentKey,
 			Paths:      items,
 			Conflicts:  conflictItems,
 			Duplicates: duplicateItems,
 		}
+		return
 	}
 
 	for _, r := range results {
@@ -152,13 +159,15 @@ func Unclaim(input UnclaimInput) (UnclaimResult, error) {
 			delete(store.Paths, r.storeKey)
 		}
 	}
-	if err := WriteStore(storeFile, store); err != nil {
-		return UnclaimResult{}, StoreErr{Phase: "write-store", StorePath: storeFile, Cause: err}
+	if writeErr := WriteStore(storeFile, store); writeErr != nil {
+		err = StoreErr{Phase: "write-store", StorePath: storeFile, Cause: writeErr}
+		return
 	}
 
 	pathItems := make([]UnclaimPathItem, len(results))
 	for i, r := range results {
 		pathItems[i] = UnclaimPathItem{Path: r.storeKey, Status: r.unclaimStatus}
 	}
-	return UnclaimResult{CurrentKey: input.CurrentKey, Paths: pathItems}, nil
+	result = UnclaimResult{CurrentKey: input.CurrentKey, Paths: pathItems}
+	return
 }

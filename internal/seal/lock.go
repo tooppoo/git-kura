@@ -48,8 +48,9 @@ func ResolveLockTimeout(repoRoot string) (time.Duration, error) {
 
 // AcquireLock creates the lock file using atomic O_CREATE|O_EXCL, retrying
 // until the supplied timeout elapses. Returns a release function that removes
-// the lock file. A zero timeout makes exactly one attempt.
-func AcquireLock(lockPath string, timeout time.Duration) (release func(), err error) {
+// the lock file and returns an error if removal fails. A zero timeout makes
+// exactly one attempt.
+func AcquireLock(lockPath string, timeout time.Duration) (release func() error, err error) {
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create seal store dir: %w", err)
 	}
@@ -58,12 +59,11 @@ func AcquireLock(lockPath string, timeout time.Duration) (release func(), err er
 		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
 			_ = f.Close()
-			return func() {
+			return func() error {
 				if removeErr := os.Remove(lockPath); removeErr != nil && !os.IsNotExist(removeErr) {
-					fmt.Fprintf(os.Stderr,
-						"warning: failed to release seal store lock %s: %v\nremove the file manually or subsequent seal commands will time out\n",
-						lockPath, removeErr)
+					return fmt.Errorf("failed to release seal store lock %s: %w\nremove the file manually or subsequent seal commands will time out", lockPath, removeErr)
 				}
+				return nil
 			}, nil
 		}
 		if !os.IsExist(err) {

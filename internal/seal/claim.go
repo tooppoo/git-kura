@@ -17,30 +17,36 @@ type ClaimInput struct {
 
 // Claim claims one or more paths for the current key in the seal store.
 // Returns ConflictErr when paths fail preflight, StoreErr for store failures,
-// LockTimeoutErr when the lock cannot be acquired.
-func Claim(input ClaimInput) (ClaimResult, error) {
-	storeFile, lockFile, err := StorePaths(input.RepoRoot)
-	if err != nil {
-		return ClaimResult{}, fmt.Errorf("resolve seal store path: %w", err)
+// LockTimeoutErr when the lock cannot be acquired. On success, warnings holds
+// any non-fatal lock-release message the caller should surface to the user.
+func Claim(input ClaimInput) (result ClaimResult, warnings []string, err error) {
+	storeFile, lockFile, pathErr := StorePaths(input.RepoRoot)
+	if pathErr != nil {
+		return ClaimResult{}, nil, fmt.Errorf("resolve seal store path: %w", pathErr)
 	}
 
-	timeout, err := ResolveLockTimeout(input.RepoRoot)
-	if err != nil {
-		return ClaimResult{}, err
+	timeout, timeoutErr := ResolveLockTimeout(input.RepoRoot)
+	if timeoutErr != nil {
+		return ClaimResult{}, nil, timeoutErr
 	}
-	release, err := AcquireLock(lockFile, timeout)
-	if err != nil {
-		return ClaimResult{}, err
+	release, lockErr := AcquireLock(lockFile, timeout)
+	if lockErr != nil {
+		return ClaimResult{}, nil, lockErr
 	}
-	defer release()
+	defer func() {
+		if releaseErr := release(); releaseErr != nil && err == nil {
+			warnings = append(warnings, releaseErr.Error())
+		}
+	}()
 
-	store, err := ReadStore(storeFile)
-	if err != nil {
+	store, storeErr := ReadStore(storeFile)
+	if storeErr != nil {
 		phase := "read-store"
-		if errors.As(err, new(StoreValidationErr)) {
+		if errors.As(storeErr, new(StoreValidationErr)) {
 			phase = "validate-store"
 		}
-		return ClaimResult{}, StoreErr{Phase: phase, StorePath: storeFile, Cause: err}
+		err = StoreErr{Phase: phase, StorePath: storeFile, Cause: storeErr}
+		return
 	}
 
 	type pathResult struct {
@@ -172,13 +178,14 @@ func Claim(input ClaimInput) (ClaimResult, error) {
 				})
 			}
 		}
-		return ClaimResult{}, ConflictErr{
+		err = ConflictErr{
 			Phase:      "preflight",
 			CurrentKey: input.CurrentKey,
 			Paths:      items,
 			Conflicts:  conflictItems,
 			Duplicates: duplicateItems,
 		}
+		return
 	}
 
 	for _, r := range results {
@@ -186,13 +193,15 @@ func Claim(input ClaimInput) (ClaimResult, error) {
 			store.Paths[r.storeKey] = Entry{Key: input.CurrentKey}
 		}
 	}
-	if err := WriteStore(storeFile, store); err != nil {
-		return ClaimResult{}, StoreErr{Phase: "write-store", StorePath: storeFile, Cause: err}
+	if writeErr := WriteStore(storeFile, store); writeErr != nil {
+		err = StoreErr{Phase: "write-store", StorePath: storeFile, Cause: writeErr}
+		return
 	}
 
 	pathItems := make([]ClaimPathItem, len(results))
 	for i, r := range results {
 		pathItems[i] = ClaimPathItem{Path: r.storeKey, Status: r.claimStatus}
 	}
-	return ClaimResult{CurrentKey: input.CurrentKey, Paths: pathItems}, nil
+	result = ClaimResult{CurrentKey: input.CurrentKey, Paths: pathItems}
+	return
 }

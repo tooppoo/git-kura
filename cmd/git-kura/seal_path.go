@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -69,11 +70,14 @@ func cmdSealClaim(opts sealClaimOptions, rawPaths []string) error {
 		return sealClaimFail(opts, "preflight", fmt.Errorf("not inside a git repository"))
 	}
 
-	result, claimErr := seal.Claim(seal.ClaimInput{
+	result, claimWarnings, claimErr := seal.Claim(seal.ClaimInput{
 		RepoRoot:   repoRoot,
 		CurrentKey: key,
 		RawPaths:   rawPaths,
 	})
+	for _, w := range claimWarnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
 	if claimErr != nil {
 		var lockErr seal.LockTimeoutErr
 		if errors.As(claimErr, &lockErr) {
@@ -172,11 +176,14 @@ func cmdSealUnclaim(opts sealUnclaimOptions, rawPaths []string) error {
 		return sealUnclaimFail(opts, "preflight", fmt.Errorf("not inside a git repository"))
 	}
 
-	result, unclaimErr := seal.Unclaim(seal.UnclaimInput{
+	result, unclaimWarnings, unclaimErr := seal.Unclaim(seal.UnclaimInput{
 		RepoRoot:   repoRoot,
 		CurrentKey: key,
 		RawPaths:   rawPaths,
 	})
+	for _, w := range unclaimWarnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
 	if unclaimErr != nil {
 		var lockErr seal.LockTimeoutErr
 		if errors.As(unclaimErr, &lockErr) {

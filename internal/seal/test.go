@@ -26,47 +26,59 @@ func Test(input TestInput) (TestResult, error) {
 		return TestResult{}, err
 	}
 
-	results := make([]TestResultItem, 0, len(input.RawPaths))
+	// Normalize all paths upfront so conflict detection and per-path decoration
+	// both use the same storeKey.
+	type normed struct {
+		raw, storeKey string
+	}
+	paths := make([]normed, 0, len(input.RawPaths))
 	for _, rawPath := range input.RawPaths {
 		relPath, normErr := NormalizePath(input.RepoRoot, rawPath)
 		if normErr != nil {
 			return TestResult{}, normErr
 		}
-		storeKey := filepath.ToSlash(relPath)
+		paths = append(paths, normed{raw: rawPath, storeKey: filepath.ToSlash(relPath)})
+	}
 
-		_, statErr := os.Stat(filepath.Join(input.RepoRoot, relPath))
-		fileExists := statErr == nil
+	// Use the shared evaluator for the conflict decision (same logic as pre-commit).
+	storeKeys := make([]string, len(paths))
+	for i, p := range paths {
+		storeKeys[i] = p.storeKey
+	}
+	conflicts := EvaluateStorePaths(store, input.CurrentKey, storeKeys)
+	conflictMap := make(map[string]string, len(conflicts)) // storeKey → ownerKey
+	for _, c := range conflicts {
+		conflictMap[c.Path] = c.SealedBy
+	}
 
-		entry, sealed := store.Paths[storeKey]
-
+	results := make([]TestResultItem, 0, len(paths))
+	for _, p := range paths {
 		var item TestResultItem
-		item.Path = storeKey
-		switch {
-		case sealed && entry.Key != input.CurrentKey:
-			k := entry.Key
+		item.Path = p.storeKey
+		if ownerKey, isConflict := conflictMap[p.storeKey]; isConflict {
 			item.Status = "claimed-by-other-key"
 			item.Safe = false
-			item.ClaimedBy = &k
-		case sealed && entry.Key == input.CurrentKey:
-			k := input.CurrentKey
+			item.ClaimedBy = &ownerKey
+		} else if entry, sealed := store.Paths[p.storeKey]; sealed {
+			k := entry.Key
 			item.Status = "claimed-by-current-key"
 			item.Safe = true
 			item.ClaimedBy = &k
-		case !fileExists:
-			item.Status = "missing-path"
+		} else {
+			_, statErr := os.Stat(filepath.Join(input.RepoRoot, p.storeKey))
+			if os.IsNotExist(statErr) {
+				item.Status = "missing-path"
+			} else {
+				item.Status = "unclaimed"
+			}
 			item.Safe = true
-			item.ClaimedBy = nil
-		default:
-			item.Status = "unclaimed"
-			item.Safe = true
-			item.ClaimedBy = nil
 		}
 		results = append(results, item)
 	}
 
 	passed := true
 	for _, r := range results {
-		if r.Status == "claimed-by-other-key" {
+		if !r.Safe {
 			passed = false
 			break
 		}

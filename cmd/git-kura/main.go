@@ -943,7 +943,11 @@ func cmdClose(key string, opts closeOptions) error {
 		}
 		return closeFail(opts, partial, "preflight", err)
 	}
-	defer release()
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", releaseErr)
+		}
+	}()
 
 	// Read and validate paths.json before destructive cleanup. An absent store
 	// is treated as empty and cleanup continues; a malformed or schema-invalid
