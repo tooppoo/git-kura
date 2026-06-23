@@ -22,7 +22,7 @@ jobs:
 
       - run: make tidy
 
-      - run: make check
+      - run: make ci
 
       - uses: codecov/codecov-action@v5
         with:

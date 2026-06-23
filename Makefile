@@ -57,5 +57,12 @@ license-save:
 tools-archive:
 	sh scripts/build-tools-archive.sh $(VERSION) .tools-dist
 
+.PHONY: lint
+lint:
+	golangci-lint run
+
+.PHONY: ci
+check: fmt-check lint vet coverage vuln license-check
+
 .PHONY: check
-check: fmt-check vet coverage vuln license-check
+check: lint ci
