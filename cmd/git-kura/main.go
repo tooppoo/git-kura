@@ -17,6 +17,7 @@ import (
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tooppoo/git-kura/internal/gitutil"
 	"github.com/tooppoo/git-kura/internal/output"
+	"github.com/tooppoo/git-kura/internal/seal"
 	"github.com/tooppoo/git-kura/internal/worktree"
 )
 
@@ -923,7 +924,7 @@ func cmdClose(key string, opts closeOptions) error {
 
 	partial := &closeDataJSON{Key: key, WorktreePath: path, Branch: branch}
 
-	storeFile, lockFile, err := pathsSealStore(repoRoot)
+	storeFile, lockFile, err := seal.StorePaths(repoRoot)
 	if err != nil {
 		return closeFail(opts, partial, "preflight", err)
 	}
@@ -931,23 +932,30 @@ func cmdClose(key string, opts closeOptions) error {
 	// Acquire the seal store lock before any destructive cleanup. A lock that
 	// cannot be acquired fails with seal-lock-timeout (code 5) and leaves the
 	// worktree, branch, paths.json, and metadata untouched.
-	timeout, err := resolveSealLockTimeout(repoRoot)
+	timeout, err := seal.ResolveLockTimeout(repoRoot)
 	if err != nil {
 		return closeFail(opts, partial, "preflight", err)
 	}
-	release, err := acquireSealLock(lockFile, timeout)
+	release, err := seal.AcquireLock(lockFile, timeout)
 	if err != nil {
+		if errors.As(err, new(seal.LockTimeoutErr)) {
+			err = exitCodeError(exitSealLockTimeout, err)
+		}
 		return closeFail(opts, partial, "preflight", err)
 	}
-	defer release()
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", releaseErr)
+		}
+	}()
 
 	// Read and validate paths.json before destructive cleanup. An absent store
 	// is treated as empty and cleanup continues; a malformed or schema-invalid
 	// store aborts close before any worktree/branch/paths.json/metadata change.
-	store, err := readSealStore(storeFile)
+	store, err := seal.ReadStore(storeFile)
 	if err != nil {
 		phase := "read-store"
-		if errors.As(err, new(sealStoreValidationErr)) {
+		if errors.As(err, new(seal.StoreValidationErr)) {
 			phase = "validate-store"
 		}
 		return closeStoreFail(opts, partial, phase, storeFile, err)
@@ -997,7 +1005,7 @@ func cmdClose(key string, opts closeOptions) error {
 		}
 	}
 	if releasedCount > 0 {
-		if err := writeSealStore(storeFile, store); err != nil {
+		if err := seal.WriteStore(storeFile, store); err != nil {
 			return closeFail(opts, partial, "release-seals", fmt.Errorf("update seal store: %w", err))
 		}
 	}

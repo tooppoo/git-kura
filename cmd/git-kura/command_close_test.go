@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/tooppoo/git-kura/internal/seal"
 )
 
 func TestRunCloseErrorPathsInProcess(t *testing.T) {
@@ -53,7 +55,7 @@ func TestRunCloseReleasesSealsInProcess(t *testing.T) {
 		if err := run([]string{"open", "51"}); err != nil {
 			t.Fatalf("open error = %v", err)
 		}
-		storeFile := seedSealStore(t, repo, map[string]sealEntry{
+		storeFile := seedSealStore(t, repo, map[string]seal.Entry{
 			"tracked.txt": {Key: "51"},
 			"other.txt":   {Key: "99"},
 		})
@@ -62,7 +64,7 @@ func TestRunCloseReleasesSealsInProcess(t *testing.T) {
 			t.Fatalf("close error = %v", err)
 		}
 
-		store, err := readSealStore(storeFile)
+		store, err := seal.ReadStore(storeFile)
 		if err != nil {
 			t.Fatalf("readSealStore: %v", err)
 		}
@@ -84,7 +86,7 @@ func TestRunCloseLockTimeoutInProcess(t *testing.T) {
 			t.Fatalf("open error = %v", err)
 		}
 
-		_, lockFile, err := pathsSealStore(repo)
+		_, lockFile, err := seal.StorePaths(repo)
 		if err != nil {
 			t.Fatalf("pathsSealStore: %v", err)
 		}
@@ -122,7 +124,7 @@ func TestRunCloseMalformedStoreInProcess(t *testing.T) {
 			t.Fatalf("open error = %v", err)
 		}
 
-		storeFile, _, err := pathsSealStore(repo)
+		storeFile, _, err := seal.StorePaths(repo)
 		if err != nil {
 			t.Fatalf("pathsSealStore: %v", err)
 		}
@@ -154,7 +156,7 @@ func TestRunCloseWorktreeDirGoneInProcess(t *testing.T) {
 		if err := run([]string{"open", "51"}); err != nil {
 			t.Fatalf("open error = %v", err)
 		}
-		storeFile := seedSealStore(t, repo, map[string]sealEntry{
+		storeFile := seedSealStore(t, repo, map[string]seal.Entry{
 			"tracked.txt": {Key: "51"},
 		})
 
@@ -168,7 +170,7 @@ func TestRunCloseWorktreeDirGoneInProcess(t *testing.T) {
 			t.Fatalf("close error = %v", err)
 		}
 
-		store, err := readSealStore(storeFile)
+		store, err := seal.ReadStore(storeFile)
 		if err != nil {
 			t.Fatalf("readSealStore: %v", err)
 		}

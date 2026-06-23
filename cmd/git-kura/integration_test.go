@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/tooppoo/git-kura/internal/seal"
 )
 
 // Integration tests exercise the git-kura binary through Git's subcommand
@@ -1468,7 +1470,7 @@ func TestSealDoctorMissingStoreSucceedsSilently(t *testing.T) {
 func TestSealDoctorDetectsInvalidStoreWithExitCode7(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
-	storeFile, _, err := pathsSealStore(repo)
+	storeFile, _, err := seal.StorePaths(repo)
 	if err != nil {
 		t.Fatalf("pathsSealStore: %v", err)
 	}
@@ -1490,11 +1492,11 @@ func TestSealDoctorDetectsInvalidStoreWithExitCode7(t *testing.T) {
 func TestSealDoctorDoesNotCreateOrAcquireLock(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
-	storeFile := seedSealStore(t, repo, map[string]sealEntry{
+	storeFile := seedSealStore(t, repo, map[string]seal.Entry{
 		"tracked.txt": {Key: "key1"},
 	})
 	before := readFileString(t, storeFile)
-	_, lockFile, err := pathsSealStore(repo)
+	_, lockFile, err := seal.StorePaths(repo)
 	if err != nil {
 		t.Fatalf("pathsSealStore: %v", err)
 	}
@@ -1743,7 +1745,7 @@ func TestCloseMalformedPathsJSONAborts(t *testing.T) {
 	repo := cli.initRepo(t)
 	cli.openWorktree(t, repo, "key1")
 
-	storeFile, _, err := pathsSealStore(repo)
+	storeFile, _, err := seal.StorePaths(repo)
 	if err != nil {
 		t.Fatalf("pathsSealStore: %v", err)
 	}
@@ -1771,7 +1773,7 @@ func TestCloseMalformedPathsJSONAbortsWithEnvelope(t *testing.T) {
 	repo := cli.initRepo(t)
 	cli.openWorktree(t, repo, "key1")
 
-	storeFile, _, err := pathsSealStore(repo)
+	storeFile, _, err := seal.StorePaths(repo)
 	if err != nil {
 		t.Fatalf("pathsSealStore: %v", err)
 	}
@@ -1807,7 +1809,7 @@ func TestCloseAbsentPathsJSONContinues(t *testing.T) {
 	repo := cli.initRepo(t)
 	cli.openWorktree(t, repo, "key1")
 
-	storeFile, _, err := pathsSealStore(repo)
+	storeFile, _, err := seal.StorePaths(repo)
 	if err != nil {
 		t.Fatalf("pathsSealStore: %v", err)
 	}
@@ -2288,7 +2290,7 @@ func TestSealDoctorJSONIntegrityFinding(t *testing.T) {
 	repo := cli.initRepo(t)
 
 	// A non-normalized path is an integrity violation in the store.
-	seedSealStore(t, repo, map[string]sealEntry{
+	seedSealStore(t, repo, map[string]seal.Entry{
 		"src/./a.go": {Key: "key1"},
 	})
 
@@ -2321,7 +2323,7 @@ func TestSealDoctorJSONMalformedStore(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
-	storeFile, _, err := pathsSealStore(repo)
+	storeFile, _, err := seal.StorePaths(repo)
 	if err != nil {
 		t.Fatalf("pathsSealStore: %v", err)
 	}

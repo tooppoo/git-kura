@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tooppoo/git-kura/internal/gitutil"
+	"github.com/tooppoo/git-kura/internal/seal"
 	"github.com/tooppoo/git-kura/internal/tools"
 )
 
@@ -228,7 +229,7 @@ func cmdToolsInstall(deps toolsDeps, targets []tools.Component) error {
 	if err != nil {
 		return err
 	}
-	timeout, err := resolveSealLockTimeout(repoRoot)
+	timeout, err := seal.ResolveLockTimeout(repoRoot)
 	if err != nil {
 		return err
 	}
@@ -248,7 +249,7 @@ func cmdToolsUninstall(deps toolsDeps, targets []tools.Component) error {
 	if err != nil {
 		return err
 	}
-	timeout, err := resolveSealLockTimeout(repoRoot)
+	timeout, err := seal.ResolveLockTimeout(repoRoot)
 	if err != nil {
 		return err
 	}

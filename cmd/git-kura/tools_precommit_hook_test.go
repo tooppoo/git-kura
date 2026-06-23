@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tooppoo/git-kura/internal/seal"
 	"github.com/tooppoo/git-kura/internal/tools"
 )
 
@@ -227,17 +228,17 @@ func TestPreCommitHookSkipsMissingPrevious(t *testing.T) {
 }
 
 func TestEvaluateSealedPaths(t *testing.T) {
-	store := sealPathStore{Paths: map[string]sealEntry{
+	store := seal.PathStore{Paths: map[string]seal.Entry{
 		"a.txt":     {Key: "k1"},
 		"dir/b.txt": {Key: "k2"},
 	}}
-	if c := evaluateSealedPaths(store, sealKeyNone, []string{"a.txt", "free.txt"}); len(c) != 1 {
+	if c := seal.EvaluateStorePaths(store, seal.KeyNone, []string{"a.txt", "free.txt"}); len(c) != 1 {
 		t.Fatalf("key none: want 1 conflict, got %d", len(c))
 	}
-	if c := evaluateSealedPaths(store, "k1", []string{"a.txt", "dir/b.txt"}); len(c) != 1 || c[0].sealedBy != "k2" {
+	if c := seal.EvaluateStorePaths(store, "k1", []string{"a.txt", "dir/b.txt"}); len(c) != 1 || c[0].SealedBy != "k2" {
 		t.Fatalf("key k1: want 1 conflict by k2, got %v", c)
 	}
-	if c := evaluateSealedPaths(store, "k1", []string{"./dir/b.txt"}); len(c) != 1 {
+	if c := seal.EvaluateStorePaths(store, "k1", []string{"./dir/b.txt"}); len(c) != 1 {
 		t.Fatalf("want canonicalized match, got %d", len(c))
 	}
 }
@@ -293,7 +294,7 @@ func TestPreCommitSealCheckFailsOnCorruptStore(t *testing.T) {
 	git(t, repo, "commit", "-m", "seed")
 	stage(t, repo, "free.txt", "free\n")
 
-	storeFile, _, err := pathsSealStore(repo)
+	storeFile, _, err := seal.StorePaths(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +304,7 @@ func TestPreCommitSealCheckFailsOnCorruptStore(t *testing.T) {
 	if err := os.WriteFile(storeFile, []byte("{not valid"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err = preCommitSealCheck(storeFile, sealKeyNone, repo, "pre-hook")
+	err = preCommitSealCheck(repo, seal.KeyNone, "pre-hook")
 	if exitCodeOf(err) != exitGeneralError {
 		t.Fatalf("corrupt store should fail closed, got %v", err)
 	}
