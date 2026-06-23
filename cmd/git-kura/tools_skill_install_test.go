@@ -236,7 +236,7 @@ func TestSkillInstallHoldsLock(t *testing.T) {
 	if err := os.WriteFile(lockFile, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(lockFile)
+	defer func() { _ = os.Remove(lockFile) }()
 
 	// Install should fail with lock timeout (or general error if timeout=0)
 	_, installErr := runToolsCLI(t, repo, deps, "install", tools.ClaudeSkillComponentID)

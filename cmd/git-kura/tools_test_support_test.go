@@ -407,11 +407,6 @@ func installedJSONPath(repo string) string {
 	return filepath.Join(repo, ".git", "kura", "tools", "installed.json")
 }
 
-func mustJSON(v any) []byte {
-	b, _ := json.Marshal(v)
-	return b
-}
-
 // --- skill test helpers ----------------------------------------------------
 
 func skillFetcher(t *testing.T, claudeContent, codexContent []byte) *fakeFetcher {
