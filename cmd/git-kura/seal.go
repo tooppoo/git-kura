@@ -10,6 +10,7 @@ import (
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tooppoo/git-kura/internal/gitutil"
+	"github.com/tooppoo/git-kura/internal/output"
 )
 
 //go:embed schema/commands/seal_ls.schema.json
@@ -87,14 +88,14 @@ type sealLsOptions struct {
 	Toon      bool
 }
 
-func (o sealLsOptions) renderMode() renderMode {
+func (o sealLsOptions) renderMode() output.RenderMode {
 	if o.Toon {
-		return renderTOON
+		return output.RenderTOON
 	}
 	if o.JSON {
-		return renderJSON
+		return output.RenderJSON
 	}
-	return renderHuman
+	return output.RenderHuman
 }
 
 type sealTestOptions struct {
@@ -102,14 +103,14 @@ type sealTestOptions struct {
 	Toon bool
 }
 
-func (o sealTestOptions) renderMode() renderMode {
+func (o sealTestOptions) renderMode() output.RenderMode {
 	if o.Toon {
-		return renderTOON
+		return output.RenderTOON
 	}
 	if o.JSON {
-		return renderJSON
+		return output.RenderJSON
 	}
-	return renderHuman
+	return output.RenderHuman
 }
 
 type sealDoctorOptions struct {
@@ -117,14 +118,14 @@ type sealDoctorOptions struct {
 	Toon bool
 }
 
-func (o sealDoctorOptions) renderMode() renderMode {
+func (o sealDoctorOptions) renderMode() output.RenderMode {
 	if o.Toon {
-		return renderTOON
+		return output.RenderTOON
 	}
 	if o.JSON {
-		return renderJSON
+		return output.RenderJSON
 	}
-	return renderHuman
+	return output.RenderHuman
 }
 
 type sealClaimOptions struct {
@@ -132,14 +133,14 @@ type sealClaimOptions struct {
 	Toon bool
 }
 
-func (o sealClaimOptions) renderMode() renderMode {
+func (o sealClaimOptions) renderMode() output.RenderMode {
 	if o.Toon {
-		return renderTOON
+		return output.RenderTOON
 	}
 	if o.JSON {
-		return renderJSON
+		return output.RenderJSON
 	}
-	return renderHuman
+	return output.RenderHuman
 }
 
 type sealUnclaimOptions struct {
@@ -147,14 +148,14 @@ type sealUnclaimOptions struct {
 	Toon bool
 }
 
-func (o sealUnclaimOptions) renderMode() renderMode {
+func (o sealUnclaimOptions) renderMode() output.RenderMode {
 	if o.Toon {
-		return renderTOON
+		return output.RenderTOON
 	}
 	if o.JSON {
-		return renderJSON
+		return output.RenderJSON
 	}
-	return renderHuman
+	return output.RenderHuman
 }
 
 // sealClaimPathItem is one path's result in the seal claim success data.
@@ -754,22 +755,22 @@ func cmdSealLs(opts sealLsOptions) error {
 	data := sealLsData{FilterKey: filterKey, Claims: claims}
 
 	mode := opts.renderMode()
-	if mode != renderHuman {
+	if mode != output.RenderHuman {
 		if err := validateData(sealLsDataSchema, data); err != nil {
 			return err
 		}
 	}
-	return emitResult(mode, Result{Command: commandSealLs, Data: data})
+	return emitResult(mode, output.Result{Command: output.CommandSealLs, Data: data})
 }
 
 // sealLsFail routes a seal ls failure to the right output. JSON/TOON requests
 // render an ok:false envelope on stdout; plain requests keep existing behavior.
 func sealLsFail(opts sealLsOptions, err error) error {
 	mode := opts.renderMode()
-	if mode == renderHuman {
+	if mode == output.RenderHuman {
 		return err
 	}
-	return emitError(mode, toCommandError(commandSealLs, err))
+	return emitError(mode, toCommandError(output.CommandSealLs, err))
 }
 
 // cmdSealDoctor validates the whole path seal store for the current Git
@@ -816,11 +817,11 @@ func cmdSealDoctor(opts sealDoctorOptions) error {
 	}
 
 	mode := opts.renderMode()
-	if mode != renderHuman {
+	if mode != output.RenderHuman {
 		if err := validateData(sealDoctorDataSchema, data); err != nil {
 			return err
 		}
-		if err := emitResult(mode, Result{Command: commandSealDoctor, Data: data}); err != nil {
+		if err := emitResult(mode, output.Result{Command: output.CommandSealDoctor, Data: data}); err != nil {
 			return err
 		}
 		if !data.Healthy {
@@ -831,7 +832,7 @@ func cmdSealDoctor(opts sealDoctorOptions) error {
 
 	// Human mode: route through the framework so JSON/TOON and human render the same data.
 	// Unhealthy findings go to stdout as a business result (ok:true, healthy:false).
-	if err := emitResult(renderHuman, Result{Command: commandSealDoctor, Data: data}); err != nil {
+	if err := emitResult(output.RenderHuman, output.Result{Command: output.CommandSealDoctor, Data: data}); err != nil {
 		return err
 	}
 	if !data.Healthy {
@@ -845,8 +846,8 @@ func cmdSealDoctor(opts sealDoctorOptions) error {
 // existing error behavior.
 func sealDoctorFail(opts sealDoctorOptions, err error) error {
 	mode := opts.renderMode()
-	if mode == renderHuman {
+	if mode == output.RenderHuman {
 		return err
 	}
-	return emitError(mode, toCommandError(commandSealDoctor, err))
+	return emitError(mode, toCommandError(output.CommandSealDoctor, err))
 }

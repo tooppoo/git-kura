@@ -1,12 +1,10 @@
-package main
-
-// Output framework: structured result -> renderer -> human, JSON, or TOON envelope.
+// Package output implements the structured output framework for git kura commands.
 //
-// Structured-output command executions do not assemble display strings on
-// stdout/stderr directly. They build a Result (on success) or return a
-// CommandError (on failure). A Renderer turns that intermediate representation
-// into output: the human renderer writes existing-style text, the JSON renderer
-// writes a schema-valid common Envelope, and the TOON renderer writes the same
+// Command executions do not write display strings to stdout/stderr directly.
+// They build a Result (on success) or return a CommandError (on failure). A
+// Renderer turns that intermediate representation into output: the human
+// renderer writes existing-style text, the JSON renderer writes a
+// schema-valid common Envelope, and the TOON renderer writes the same
 // validated Envelope in Token-Oriented Object Notation for AI-friendly output.
 //
 // Renderers never depend on command-specific types: they treat a Result's Data
@@ -14,11 +12,17 @@ package main
 // of Data to the HumanRenderable interface that command-specific data
 // implements.
 //
-// Scalar output (get --path / --branch / --root) is shell-substitution input
-// and is intentionally not routed through this framework; it keeps printing a
-// single bare value via fmt.Println. Scalar output and --json/--toon are
-// mutually exclusive (a usage error), so a scalar request never produces an
-// envelope.
+// This package must not depend on Cobra command objects, Cobra command trees,
+// or os.Stdout / os.Stderr. Command adapters pass explicit io.Writer values
+// when calling renderers, and pass an explicit Command identifier (an
+// output-contract identifier, not a value derived from the CLI structure) when
+// building Result or CommandError values.
+//
+// Command identifier constants are transitional residents of this package: in
+// the long term they may move to internal/cli or to individual command
+// adapters once internal/cli, internal/seal, and internal/tools are separated
+// and internal/output knowing every command becomes an undesirable dependency.
+package output
 
 import (
 	"bytes"
@@ -31,18 +35,21 @@ import (
 	toon "github.com/toon-format/toon-go"
 )
 
-// envelopeSchemaVersion is the schema version stamped into every structured
-// output envelope. It versions the common envelope shape only; command-specific
-// data and error.details schemas version independently in follow-up issues.
-const envelopeSchemaVersion = 1
+// SchemaVersion is the schema version stamped into every structured output
+// envelope. It versions the common envelope shape only; command-specific data
+// and error.details schemas version independently.
+const SchemaVersion = 1
 
 //go:embed schema/envelope.schema.json
-var envelopeSchemaJSON []byte
+var SchemaJSON []byte
 
-var envelopeSchema = mustCompileEnvelopeSchema()
+// Schema is the compiled envelope JSON Schema used to validate every envelope
+// before it is emitted. A validation failure is an internal error: the command
+// produced output that violates the envelope contract.
+var Schema = mustCompileEnvelopeSchema()
 
 func mustCompileEnvelopeSchema() *jsonschema.Schema {
-	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(envelopeSchemaJSON))
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(SchemaJSON))
 	if err != nil {
 		panic(fmt.Sprintf("parse envelope schema: %v", err))
 	}
@@ -58,52 +65,51 @@ func mustCompileEnvelopeSchema() *jsonschema.Schema {
 }
 
 // Command is the canonical identifier for a command execution in structured
-// output. It is dot-separated so subcommands stay grouped under their command
-// (for example "seal.claim"). The schema's command enum must list exactly the
-// values in allCommands.
+// output. It is dot-separated so subcommands stay grouped under their parent
+// command (for example "seal.claim"). The schema's command enum must list
+// exactly the values in AllCommands.
 type Command string
 
 const (
-	commandGet         Command = "get"
-	commandOpen        Command = "open"
-	commandClose       Command = "close"
-	commandLs          Command = "ls"
-	commandSealClaim   Command = "seal.claim"
-	commandSealUnclaim Command = "seal.unclaim"
-	commandSealTest    Command = "seal.test"
-	commandSealLs      Command = "seal.ls"
-	commandSealDoctor  Command = "seal.doctor"
+	CommandGet         Command = "get"
+	CommandOpen        Command = "open"
+	CommandClose       Command = "close"
+	CommandLs          Command = "ls"
+	CommandSealClaim   Command = "seal.claim"
+	CommandSealUnclaim Command = "seal.unclaim"
+	CommandSealTest    Command = "seal.test"
+	CommandSealLs      Command = "seal.ls"
+	CommandSealDoctor  Command = "seal.doctor"
 )
 
-// allCommands is the canonical set of command identifiers. It is the source of
-// truth that the envelope schema's command enum mirrors; a test cross-checks the
-// two so they cannot drift.
-var allCommands = []Command{
-	commandGet,
-	commandOpen,
-	commandClose,
-	commandLs,
-	commandSealClaim,
-	commandSealUnclaim,
-	commandSealTest,
-	commandSealLs,
-	commandSealDoctor,
+// AllCommands is the canonical set of command identifiers. It is the source of
+// truth that the envelope schema's command enum mirrors; a test cross-checks
+// the two so they cannot drift.
+var AllCommands = []Command{
+	CommandGet,
+	CommandOpen,
+	CommandClose,
+	CommandLs,
+	CommandSealClaim,
+	CommandSealUnclaim,
+	CommandSealTest,
+	CommandSealLs,
+	CommandSealDoctor,
 }
 
 // Warning is a non-fatal diagnostic attached to a command execution. Warnings
-// are reported in both successful and failed envelopes. Details carries optional
-// command-specific structure (for example the conflicts found by open --dry-run)
-// and is treated as opaque by renderers.
+// are reported in both successful and failed envelopes. Details carries
+// optional command-specific structure and is treated as opaque by renderers.
 type Warning struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Details any    `json:"details,omitempty"`
 }
 
-// envelopeError is the machine-readable error of a failed command. Code uses the
-// same hyphen-case reason tokens as the stderr error output and the exit-code
-// names. Details carries optional command-specific structure and is treated as
-// opaque by renderers.
+// envelopeError is the machine-readable error of a failed command. Code uses
+// the same hyphen-case reason tokens as the stderr error output and the
+// exit-code names. Details carries optional command-specific structure and is
+// treated as opaque by renderers.
 type envelopeError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -132,13 +138,14 @@ type Result struct {
 	Warnings []Warning
 }
 
-// CommandError is the intermediate representation of a failed command execution.
-// It carries everything both renderers need: the human stderr Message, the
-// hyphen-case Code, the process ExitCode, and optional machine-readable Details.
+// CommandError is the intermediate representation of a failed command
+// execution. It carries everything both renderers need: the human stderr
+// Message, the hyphen-case Code, the process ExitCode, and optional
+// machine-readable Details.
 //
 // In non-JSON mode the human renderer writes Message to stderr, preserving the
-// existing stderr error output; in JSON mode the JSON renderer converts it into
-// an error envelope on stdout. Either way main exits with ExitCode.
+// existing stderr error output; in JSON mode the JSON renderer converts it
+// into an error envelope on stdout. Either way main exits with ExitCode.
 type CommandError struct {
 	Command  Command
 	Code     string
@@ -151,40 +158,37 @@ type CommandError struct {
 func (e *CommandError) Error() string { return e.Message }
 
 // HumanRenderable is implemented by command-specific data that knows how to
-// render its own human-readable representation. The human renderer delegates to
-// it so the renderer itself stays free of command-specific types.
+// render its own human-readable representation. The human renderer delegates
+// to it so the renderer itself stays free of command-specific types.
 type HumanRenderable interface {
 	RenderHuman(w io.Writer) error
 }
 
 // Renderer turns a structured Result or CommandError into output on the given
-// writers. Implementations must not depend on command-specific data types: they
-// treat Data and Details as opaque values.
+// writers. Implementations must not depend on command-specific data types:
+// they treat Data and Details as opaque values.
 type Renderer interface {
 	RenderResult(stdout, stderr io.Writer, r Result) error
 	RenderError(stdout, stderr io.Writer, e *CommandError) error
 }
 
-// renderMode selects between human-readable, JSON, and TOON structured output.
+// RenderMode selects between human-readable, JSON, and TOON structured output.
 // It is the renderer-relevant projection of the CLI output mode; scalar modes
 // never reach a renderer.
-type renderMode int
+type RenderMode int
 
 const (
-	renderHuman renderMode = iota
-	renderJSON
-	renderTOON
+	RenderHuman RenderMode = iota
+	RenderJSON
+	RenderTOON
 )
 
-// selectRenderer returns the renderer for the given mode. This is the
-// main/run/renderer boundary: run decides the mode from parsed flags and hands a
-// Result or CommandError to the selected renderer, which owns all stdout/stderr
-// writing for structured output.
-func selectRenderer(mode renderMode) Renderer {
+// SelectRenderer returns the Renderer for the given mode.
+func SelectRenderer(mode RenderMode) Renderer {
 	switch mode {
-	case renderJSON:
+	case RenderJSON:
 		return jsonRenderer{}
-	case renderTOON:
+	case RenderTOON:
 		return toonRenderer{}
 	default:
 		return humanRenderer{}
@@ -219,26 +223,26 @@ func (humanRenderer) RenderError(stdout, stderr io.Writer, e *CommandError) erro
 	return err
 }
 
-// jsonRenderer writes a schema-valid common Envelope to stdout for both success
-// and failure.
+// jsonRenderer writes a schema-valid common Envelope to stdout for both
+// success and failure.
 type jsonRenderer struct{}
 
 func (jsonRenderer) RenderResult(stdout, stderr io.Writer, r Result) error {
-	return writeEnvelope(stdout, Envelope{
+	return WriteEnvelope(stdout, Envelope{
 		OK:            true,
 		Command:       r.Command,
-		SchemaVersion: envelopeSchemaVersion,
+		SchemaVersion: SchemaVersion,
 		Data:          r.Data,
-		Warnings:      normalizeWarnings(r.Warnings),
+		Warnings:      NormalizeWarnings(r.Warnings),
 	})
 }
 
 func (jsonRenderer) RenderError(stdout, stderr io.Writer, e *CommandError) error {
-	return writeEnvelope(stdout, Envelope{
+	return WriteEnvelope(stdout, Envelope{
 		OK:            false,
 		Command:       e.Command,
-		SchemaVersion: envelopeSchemaVersion,
-		Warnings:      normalizeWarnings(e.Warnings),
+		SchemaVersion: SchemaVersion,
+		Warnings:      NormalizeWarnings(e.Warnings),
 		Error: &envelopeError{
 			Code:    e.Code,
 			Message: e.Message,
@@ -248,23 +252,23 @@ func (jsonRenderer) RenderError(stdout, stderr io.Writer, e *CommandError) error
 }
 
 // toonRenderer writes a schema-valid common Envelope in TOON format to stdout
-// for both success and failure. It reuses the same encodeEnvelope validation
-// helper as jsonRenderer; the validated JSON bytes are then decoded to a generic
-// map and re-encoded as TOON so that field names follow the JSON tag conventions
-// (camelCase) rather than Go field names.
+// for both success and failure. It reuses the same EncodeEnvelope validation
+// helper as jsonRenderer; the validated JSON bytes are then decoded to a
+// generic map and re-encoded as TOON so that field names follow the JSON tag
+// conventions (camelCase) rather than Go field names.
 //
-// TOON output is experimental: its whitespace, line breaks, and field order are
-// not part of the stable contract. The stable contract is the JSON envelope and
-// the command-specific JSON Schemas.
+// TOON output is experimental: its whitespace, line breaks, and field order
+// are not part of the stable contract. The stable contract is the JSON
+// envelope and the command-specific JSON Schemas.
 type toonRenderer struct{}
 
 func (toonRenderer) RenderResult(stdout, stderr io.Writer, r Result) error {
 	return writeTOONEnvelope(stdout, Envelope{
 		OK:            true,
 		Command:       r.Command,
-		SchemaVersion: envelopeSchemaVersion,
+		SchemaVersion: SchemaVersion,
 		Data:          r.Data,
-		Warnings:      normalizeWarnings(r.Warnings),
+		Warnings:      NormalizeWarnings(r.Warnings),
 	})
 }
 
@@ -272,8 +276,8 @@ func (toonRenderer) RenderError(stdout, stderr io.Writer, e *CommandError) error
 	return writeTOONEnvelope(stdout, Envelope{
 		OK:            false,
 		Command:       e.Command,
-		SchemaVersion: envelopeSchemaVersion,
-		Warnings:      normalizeWarnings(e.Warnings),
+		SchemaVersion: SchemaVersion,
+		Warnings:      NormalizeWarnings(e.Warnings),
 		Error: &envelopeError{
 			Code:    e.Code,
 			Message: e.Message,
@@ -282,13 +286,13 @@ func (toonRenderer) RenderError(stdout, stderr io.Writer, e *CommandError) error
 	})
 }
 
-// writeTOONEnvelope encodes and validates e via the shared encodeEnvelope
+// writeTOONEnvelope encodes and validates e via the shared EncodeEnvelope
 // helper, then converts the validated JSON representation to TOON. Converting
 // through the JSON bytes (rather than marshalling the Envelope struct directly)
 // preserves camelCase field names from JSON struct tags and ensures all values
 // are basic Go types that the TOON encoder handles without special cases.
 func writeTOONEnvelope(w io.Writer, e Envelope) error {
-	jsonBytes, err := encodeEnvelope(e)
+	jsonBytes, err := EncodeEnvelope(e)
 	if err != nil {
 		return err
 	}
@@ -304,20 +308,20 @@ func writeTOONEnvelope(w io.Writer, e Envelope) error {
 	return err
 }
 
-// normalizeWarnings guarantees a non-nil slice so warnings marshals to a JSON
+// NormalizeWarnings guarantees a non-nil slice so warnings marshals to a JSON
 // array ([]) rather than null, on both success and failure.
-func normalizeWarnings(warnings []Warning) []Warning {
+func NormalizeWarnings(warnings []Warning) []Warning {
 	if warnings == nil {
 		return []Warning{}
 	}
 	return warnings
 }
 
-// encodeEnvelope marshals an Envelope to JSON and validates it against
-// schema/envelope.schema.json before it is emitted. A validation failure is an
-// internal error: it means a command produced output that violates the envelope
-// contract.
-func encodeEnvelope(e Envelope) ([]byte, error) {
+// EncodeEnvelope marshals an Envelope to JSON and validates it against
+// schema/envelope.schema.json before it is emitted. A validation failure is
+// an internal error: it means a command produced output that violates the
+// envelope contract.
+func EncodeEnvelope(e Envelope) ([]byte, error) {
 	out, err := json.Marshal(e)
 	if err != nil {
 		return nil, fmt.Errorf("internal: marshal envelope: %w", err)
@@ -326,14 +330,15 @@ func encodeEnvelope(e Envelope) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("internal: parse envelope: %w", err)
 	}
-	if err := envelopeSchema.Validate(inst); err != nil {
+	if err := Schema.Validate(inst); err != nil {
 		return nil, fmt.Errorf("internal: json output does not conform to envelope schema: %w", err)
 	}
 	return out, nil
 }
 
-func writeEnvelope(w io.Writer, e Envelope) error {
-	out, err := encodeEnvelope(e)
+// WriteEnvelope encodes, validates, and writes an Envelope to w.
+func WriteEnvelope(w io.Writer, e Envelope) error {
+	out, err := EncodeEnvelope(e)
 	if err != nil {
 		return err
 	}

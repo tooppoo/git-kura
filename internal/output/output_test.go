@@ -1,15 +1,20 @@
-package main
+package output_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"testing"
 
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
+	toon "github.com/toon-format/toon-go"
 	"github.com/tooppoo/git-kura/internal/output"
 )
 
+// sampleData is a minimal HumanRenderable payload used across renderer tests.
 type sampleData struct {
 	Value string `json:"value"`
 }
@@ -19,9 +24,98 @@ func (d sampleData) RenderHuman(w io.Writer) error {
 	return err
 }
 
+// failWriter always returns a write error.
 type failWriter struct{}
 
 func (failWriter) Write(p []byte) (int, error) { return 0, fmt.Errorf("write failed") }
+
+// requireConformsToEnvelopeSchema asserts that jsonOutput validates against the
+// envelope schema.
+func requireConformsToEnvelopeSchema(t *testing.T, jsonOutput string) {
+	t.Helper()
+	inst, err := jsonschema.UnmarshalJSON(strings.NewReader(jsonOutput))
+	if err != nil {
+		t.Fatalf("parse json output: %v\noutput: %s", err, jsonOutput)
+	}
+	if err := output.Schema.Validate(inst); err != nil {
+		t.Fatalf("json output does not conform to envelope schema:\n%v\noutput: %s", err, jsonOutput)
+	}
+}
+
+func decodeEnvelope(t *testing.T, jsonOutput string) map[string]any {
+	t.Helper()
+	var env map[string]any
+	if err := json.Unmarshal([]byte(jsonOutput), &env); err != nil {
+		t.Fatalf("decode envelope: %v\noutput: %s", err, jsonOutput)
+	}
+	return env
+}
+
+// --- Schema tests ---
+
+func TestEnvelopeSchemaAcceptsValidEnvelopes(t *testing.T) {
+	cases := map[string]string{
+		"success with empty warnings": `{"ok":true,"command":"get","schemaVersion":1,"data":{"value":"x"},"warnings":[]}`,
+		"success with warnings":       `{"ok":true,"command":"open","schemaVersion":1,"data":{},"warnings":[{"code":"some-warning","message":"heads up"}]}`,
+		"failure with empty warnings": `{"ok":false,"command":"seal.claim","schemaVersion":1,"warnings":[],"error":{"code":"seal-conflict","message":"already claimed"}}`,
+		"failure with details":        `{"ok":false,"command":"close","schemaVersion":1,"warnings":[],"error":{"code":"unsafe-refused","message":"refused","details":{"path":"x"}}}`,
+	}
+	for name, env := range cases {
+		t.Run(name, func(t *testing.T) {
+			requireConformsToEnvelopeSchema(t, env)
+		})
+	}
+}
+
+func TestSchemaCommandEnumMatchesAllCommands(t *testing.T) {
+	var schemaDoc struct {
+		Properties struct {
+			Command struct {
+				Enum []string `json:"enum"`
+			} `json:"command"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(output.SchemaJSON, &schemaDoc); err != nil {
+		t.Fatalf("parse envelope schema: %v", err)
+	}
+
+	want := make([]string, len(output.AllCommands))
+	for i, c := range output.AllCommands {
+		want[i] = string(c)
+	}
+	got := append([]string(nil), schemaDoc.Properties.Command.Enum...)
+
+	sort.Strings(want)
+	sort.Strings(got)
+	if strings.Join(want, ",") != strings.Join(got, ",") {
+		t.Fatalf("schema command enum %v does not match AllCommands %v", got, want)
+	}
+}
+
+func TestEncodeEnvelopeSchemaValidationFailure(t *testing.T) {
+	_, err := output.EncodeEnvelope(output.Envelope{})
+	if err == nil {
+		t.Fatal("EncodeEnvelope with empty Envelope: expected schema validation error, got nil")
+	}
+}
+
+func TestWriteEnvelopePropagatesEncodeError(t *testing.T) {
+	var buf strings.Builder
+	err := output.WriteEnvelope(&buf, output.Envelope{
+		OK:            true,
+		Command:       output.CommandGet,
+		SchemaVersion: output.SchemaVersion,
+		Warnings:      []output.Warning{},
+	})
+	if err == nil {
+		t.Fatal("WriteEnvelope with invalid envelope = nil, want error")
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("buf = %q, want empty on encode failure", buf.String())
+	}
+}
+
+// --- JSON renderer tests ---
 
 func TestJSONRendererRendersSchemaValidSuccessEnvelope(t *testing.T) {
 	var stdout, stderr bytes.Buffer
@@ -60,7 +154,7 @@ func TestJSONRendererRendersSchemaValidErrorEnvelope(t *testing.T) {
 		Command:  output.CommandSealClaim,
 		Code:     "seal-conflict",
 		Message:  "path is already claimed",
-		ExitCode: exitSealConflict,
+		ExitCode: 6,
 	}); err != nil {
 		t.Fatalf("RenderError: %v", err)
 	}
@@ -104,6 +198,8 @@ func TestJSONRendererCarriesWarnings(t *testing.T) {
 	}
 }
 
+// --- Human renderer tests ---
+
 func TestHumanRendererWritesToProvidedWriters(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	r := output.SelectRenderer(output.RenderHuman)
@@ -121,9 +217,6 @@ func TestHumanRendererWritesToProvidedWriters(t *testing.T) {
 	if !strings.Contains(stderr.String(), "metadata is stale") {
 		t.Fatalf("stderr = %q, want it to contain the warning", stderr.String())
 	}
-	if strings.Contains(stdout.String(), "\"ok\"") {
-		t.Fatalf("human stdout must not be an envelope: %q", stdout.String())
-	}
 }
 
 func TestHumanRendererWritesErrorToStderr(t *testing.T) {
@@ -133,7 +226,7 @@ func TestHumanRendererWritesErrorToStderr(t *testing.T) {
 		Command:  output.CommandClose,
 		Code:     "unsafe-refused",
 		Message:  "refusing to remove a dirty worktree",
-		ExitCode: exitUnsafeRefused,
+		ExitCode: 3,
 	}); err != nil {
 		t.Fatalf("RenderError: %v", err)
 	}
@@ -164,6 +257,93 @@ func TestHumanRendererSkipsNonRenderableData(t *testing.T) {
 	}
 }
 
+// --- TOON renderer tests ---
+
+func TestTOONRendererRendersSuccessEnvelope(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := output.SelectRenderer(output.RenderTOON)
+	if err := r.RenderResult(&stdout, &stderr, output.Result{
+		Command: output.CommandGet,
+		Data:    sampleData{Value: "hello"},
+	}); err != nil {
+		t.Fatalf("RenderResult: %v", err)
+	}
+
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"ok", "command", "schemaVersion", "warnings"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("TOON output = %q, want it to contain field %q", out, want)
+		}
+	}
+}
+
+func TestTOONRendererRendersErrorEnvelope(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := output.SelectRenderer(output.RenderTOON)
+	if err := r.RenderError(&stdout, &stderr, &output.CommandError{
+		Command:  output.CommandSealClaim,
+		Code:     "seal-conflict",
+		Message:  "path is already claimed",
+		ExitCode: 6,
+	}); err != nil {
+		t.Fatalf("RenderError: %v", err)
+	}
+
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"ok", "command", "schemaVersion", "error", "warnings"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("TOON output = %q, want it to contain field %q", out, want)
+		}
+	}
+}
+
+func TestTOONRendererIsDecodable(t *testing.T) {
+	var stdout bytes.Buffer
+	r := output.SelectRenderer(output.RenderTOON)
+	if err := r.RenderResult(&stdout, &bytes.Buffer{}, output.Result{
+		Command: output.CommandLs,
+		Data:    sampleData{Value: "k1"},
+	}); err != nil {
+		t.Fatalf("RenderResult: %v", err)
+	}
+
+	decoded, err := toon.DecodeString(strings.TrimSpace(stdout.String()))
+	if err != nil {
+		t.Fatalf("toon.DecodeString: %v", err)
+	}
+	obj, ok := decoded.(map[string]any)
+	if !ok {
+		t.Fatalf("decoded = %T, want map[string]any", decoded)
+	}
+	for _, key := range []string{"ok", "command", "schemaVersion", "data", "warnings"} {
+		if _, exists := obj[key]; !exists {
+			t.Fatalf("decoded TOON missing key %q", key)
+		}
+	}
+	if obj["ok"] != true {
+		t.Fatalf("ok = %v, want true", obj["ok"])
+	}
+	if obj["command"] != "ls" {
+		t.Fatalf("command = %v, want ls", obj["command"])
+	}
+}
+
+func TestTOONRendererPropagatesWriteError(t *testing.T) {
+	r := output.SelectRenderer(output.RenderTOON)
+	err := r.RenderResult(failWriter{}, &bytes.Buffer{}, output.Result{Command: output.CommandGet, Data: sampleData{Value: "x"}})
+	if err == nil {
+		t.Fatal("RenderResult on failing stdout = nil, want error")
+	}
+}
+
+// --- Utility tests ---
+
 func TestNormalizeWarningsNeverReturnsNil(t *testing.T) {
 	if got := output.NormalizeWarnings(nil); got == nil || len(got) != 0 {
 		t.Fatalf("NormalizeWarnings(nil) = %v, want empty non-nil slice", got)
@@ -182,18 +362,18 @@ func TestCommandErrorErrorReturnsMessage(t *testing.T) {
 }
 
 func TestRenderersPropagateWriteErrors(t *testing.T) {
-	json := output.SelectRenderer(output.RenderJSON)
+	jsonR := output.SelectRenderer(output.RenderJSON)
 	human := output.SelectRenderer(output.RenderHuman)
 	var discard bytes.Buffer
 
 	t.Run("json result write failure", func(t *testing.T) {
-		err := json.RenderResult(failWriter{}, &discard, output.Result{Command: output.CommandGet, Data: sampleData{Value: "x"}})
+		err := jsonR.RenderResult(failWriter{}, &discard, output.Result{Command: output.CommandGet, Data: sampleData{Value: "x"}})
 		if err == nil {
 			t.Fatal("RenderResult on failing stdout = nil, want error")
 		}
 	})
 	t.Run("json error write failure", func(t *testing.T) {
-		err := json.RenderError(failWriter{}, &discard, &output.CommandError{Command: output.CommandGet, Code: "x", Message: "y"})
+		err := jsonR.RenderError(failWriter{}, &discard, &output.CommandError{Command: output.CommandGet, Code: "x", Message: "y"})
 		if err == nil {
 			t.Fatal("RenderError on failing stdout = nil, want error")
 		}
