@@ -280,7 +280,7 @@ func registryComponents(reg *tools.Registry, ids []string) ([]tools.Component, e
 	return targets, nil
 }
 
-func (r *runner) cmdToolsStatus(deps toolsDeps, targets []tools.Component) error {
+func (r *runner) cmdToolsStatus(_ toolsDeps, targets []tools.Component) error {
 	repoRoot, err := r.toolsRepoRoot()
 	if err != nil {
 		return err
@@ -312,7 +312,7 @@ func (r *runner) cmdToolsInstall(deps toolsDeps, targets []tools.Component) erro
 	return r.reportToolsResults(result.Results)
 }
 
-func (r *runner) cmdToolsUninstall(deps toolsDeps, targets []tools.Component) error {
+func (r *runner) cmdToolsUninstall(_ toolsDeps, targets []tools.Component) error {
 	repoRoot, err := r.toolsRepoRoot()
 	if err != nil {
 		return err

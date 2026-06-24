@@ -38,13 +38,11 @@ func Run(args []string, stdout, stderr io.Writer, version string) ExitCode {
 	if err == nil {
 		return exitSuccess
 	}
-	var re *renderedError
-	if errors.As(err, &re) {
+	if re, ok := errors.AsType[*renderedError](err); ok {
 		return ExitCode(re.code)
 	}
 	_, _ = fmt.Fprintln(stderr, err)
-	var xe *exitError
-	if errors.As(err, &xe) {
+	if xe, ok := errors.AsType[*exitError](err); ok {
 		return ExitCode(xe.code)
 	}
 	return exitGeneralError
