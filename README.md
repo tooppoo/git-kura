@@ -5,7 +5,7 @@
 [![codecov](https://codecov.io/gh/tooppoo/git-kura/graph/badge.svg?token=5f8XJ77qiN)](https://codecov.io/gh/tooppoo/git-kura)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-<img src="./docs/assets/git-kura.png" alt="git-kura.png" width="75%">
+<img src="./docs/assets/git-kura.png" alt="git-kura.png" width="40%">
 
 `git-kura` is a conflict-aware keyed worktree coordinator for Git.
 
