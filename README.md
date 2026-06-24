@@ -156,3 +156,12 @@ Tool components are installed from the tools release archive that matches the ru
 ## License
 
 Apache License 2.0
+
+## Related
+
+### Windows Release
+
+- https://github.com/tooppoo/catalog-scoop-bucket
+- https://github.com/tooppoo/winget-pkgs
+- https://github.com/russellbanks/Komac
+- https://github.com/microsoft/winget-pkgs
