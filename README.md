@@ -9,15 +9,6 @@
 
 It helps humans, AI coding agents, and reviewers run multiple task-specific worktrees in parallel while detecting and preventing conflicting edits early.
 
-Instead of relying on each agent to remember where it is working, Kura makes a stable task key the source of truth:
-
-```txt
-task key
-  -> branch name
-  -> worktree path
-  -> path claims
-```
-
 ![A screenshot showing when `git-kura` detects a conflict and the agent stops running](./docs/assets/image.png)
 
 ## Why Kura?
@@ -74,6 +65,19 @@ git kura tools install pre-commit claude-skill codex-skill
 ```
 
 The `pre-commit` component rejects commits whose staged files conflict with another task's path seals. The `claude-skill` and `codex-skill` components install agent instructions into the repository so agents can use Kura consistently.
+
+## Design principles
+
+Kura（`蔵`） is built around these ideas:
+
+* **The key is the source of truth**: humans and agents should not need to remember worktree paths manually.
+* **Worktree isolation**: each key gets its own Git worktree and branch.
+* **Early conflict detection**: path seals make intended edits visible before implementation, commit, or merge.
+* **Script- and agent-friendly output**: commands support plain output for shell scripts, JSON for structured tools, and TOON for AI prompts.
+* **Repository-local state**: Kura stores worktree metadata, path seals, and tool metadata in repository-local Git state.
+* **Safety over convenience**: destructive operations are conservative and should stop rather than silently discard or overwrite user work.
+
+Kura is intentionally small. It is not a Git client, an AI session manager, a pull request tool, an issue tracker client, or a project management tool.
 
 ## Parallel worktree workflow
 
@@ -155,18 +159,6 @@ Available component IDs are:
 
 Tool components are installed from the tools release archive that matches the running binary's release version. The archive checksum is verified before extraction. Existing user-modified or unmanaged files are not overwritten.
 
-## Design principles
-
-Kura（`蔵`） is built around these ideas:
-
-* **The key is the source of truth**: humans and agents should not need to remember worktree paths manually.
-* **Worktree isolation**: each key gets its own Git worktree and branch.
-* **Early conflict detection**: path seals make intended edits visible before implementation, commit, or merge.
-* **Script- and agent-friendly output**: commands support plain output for shell scripts, JSON for structured tools, and TOON for AI prompts.
-* **Repository-local state**: Kura stores worktree metadata, path seals, and tool metadata in repository-local Git state.
-* **Safety over convenience**: destructive operations are conservative and should stop rather than silently discard or overwrite user work.
-
-Kura is intentionally small. It is not a Git client, an AI session manager, a pull request tool, an issue tracker client, or a project management tool.
 
 ## Documentation
 
