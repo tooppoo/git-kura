@@ -324,6 +324,9 @@ opened: .git/kura/worktrees/key1 (branch: key1)
 
 For `--dry-run` without `--json`, the format shows `worktree path`, `branch`, `repository root`, and `base branch` so the user can review what will be created.
 
-## Metadata schema
+## Schema reference
 
-The common envelope is defined in [`internal/output/schema/envelope.schema.json`](../internal/output/schema/envelope.schema.json). Command-specific `data` payload schemas are defined under [`internal/cli/schema`](../internal/cli/schema), for example [`get_data.schema.json`](../internal/cli/schema/get_data.schema.json) and [`commands/open.schema.json`](../internal/cli/schema/commands/open.schema.json). The seal store schema is defined with the seal package at [`internal/seal/schema/seal_store.schema.json`](../internal/seal/schema/seal_store.schema.json). Runtime validation embeds the schemas used by the corresponding packages.
+For the full schema specification — including public contract schemas with GitHub view links and raw URLs, limited-contract fields for AI agents, and internal persistence schemas — see [schema.md](schema.md).
+
+The common envelope schema is at `internal/output/schema/envelope.schema.json` and command-specific data schemas are under `internal/cli/schema/`.
+Runtime validation embeds the schemas used by the corresponding packages via `//go:embed`.
