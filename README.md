@@ -36,7 +36,7 @@ Kura addresses these failure modes with two small primitives:
 * **keyed worktrees**: one stable key resolves to one deterministic branch and worktree;
 * **path seals**: a task claims the repository-relative paths it intends to edit, so other tasks can detect the overlap before editing, committing, or merging.
 
-Kura does not try to manage the AI session itself. It gives agents, scripts, and humans a shared local coordination layer that is explicit, inspectable, and Git-native.
+Kura would makes it easier to delegate multiple tasks to AI agents without manually reasoning about every possible conflict up front. If a worktree is likely to conflict with another active task, Kura can stop it before changes are made.
 
 ## Quick Start
 
