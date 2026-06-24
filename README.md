@@ -39,28 +39,9 @@ Install the latest release:
 curl -fsSL https://raw.githubusercontent.com/tooppoo/git-kura/main/install.sh | sh
 ```
 
-This installs `git-kura` into `~/.local/bin`. See [docs/installation.md](docs/installation.md) for version pinning, custom install directories, checksum verification, and other installation methods.
+This installs `git-kura` into `~/.local/bin`. See [docs/installation.md](docs/installation.md) for version pinning, custom install directories, checksum verification, and other installation methods(i.e. Windows).
 
-Create a task worktree:
-
-```sh
-git kura open issue-54
-cd "$(git kura get issue-54)"
-```
-
-Claim the files this task intends to edit:
-
-```sh
-git kura seal claim README.md docs/commands.md
-```
-
-Check whether another task has already claimed a path:
-
-```sh
-git kura seal test README.md
-```
-
-Install repository-local safety helpers from the matching release asset:
+It is recommended to install repository-local safety helpers:
 
 ```sh
 git kura tools install pre-commit claude-skill codex-skill

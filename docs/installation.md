@@ -40,14 +40,6 @@ export PATH="$HOME/.local/bin:$PATH"
 
 Git recognises `git-kura` as the external subcommand `git kura` automatically once the binary is on `PATH`.
 
-### Supported platforms
-
-| OS    | Architecture       |
-|-------|--------------------|
-| Linux | x86\_64 / amd64   |
-| Linux | arm64 / aarch64   |
-| macOS | x86\_64           |
-| macOS | arm64 (Apple Silicon) |
 
 ### Verification
 
@@ -59,3 +51,35 @@ ura`. Place it somewhere on `PATH`:
 ```sh
 cp ./bin/git-kura ~/.local/bin/git-kura
 ```
+
+## Scoop (Windows)
+
+On Windows, `git-kura` can be installed from the Philomagi Scoop bucket:
+
+```powershell
+scoop bucket add philomagi https://github.com/tooppoo/catalog-scoop-bucket
+scoop install git-kura
+````
+
+After installation, verify that Git external subcommand are available:
+
+```powershell
+git kura -v
+```
+
+To uninstall:
+
+```powershell
+scoop uninstall git-kura
+```
+
+## Supported platforms
+
+| OS    | Architecture       |
+|-------|--------------------|
+| Linux | x86\_64 / amd64   |
+| Linux | arm64 / aarch64   |
+| macOS | x86\_64           |
+| macOS | arm64 (Apple Silicon) |
+| Windows | x86\_64 |
+| Windows | arm64 |
