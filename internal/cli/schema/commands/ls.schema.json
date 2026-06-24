@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/cmd/git-kura/schema/commands/ls.schema.json",
+  "title": "git kura ls — envelope data",
+  "description": "Command-specific schema for the data payload of `git kura ls --json`, nested under the common envelope's data field.",
+  "type": "object",
+  "required": ["keys"],
+  "additionalProperties": false,
+  "properties": {
+    "keys": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Open worktree keys, alphabetically sorted."
+    }
+  }
+}

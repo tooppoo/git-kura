@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/cmd/git-kura/schema/seal_store.schema.json",
+  "title": "git kura seal store",
+  "description": "Schema for <git-common-dir>/kura/seals/paths.json, the centralized path seal store.",
+  "type": "object",
+  "required": ["schemaVersion", "paths"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "paths": {
+      "type": "object",
+      "description": "Map from repository-relative path (forward-slash separators) to its seal entry.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["key"],
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The seal key that owns this path."
+          }
+        }
+      }
+    }
+  }
+}
