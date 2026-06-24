@@ -116,8 +116,8 @@ Such changes are versioned by the relevant state schema's own `schemaVersion` fi
 
 | Purpose | File |
 |---|---|
-| Worktree metadata (stored under `.git/kura/worktrees/`) | `internal/worktree/schema/metadata.schema.json` |
-| Seal store (stored under `.git/kura/`) | `internal/seal/schema/seal_store.schema.json` |
+| Worktree metadata (stored at `<git-common-dir>/kura/meta/worktrees/<key>.json`) | `internal/worktree/schema/metadata.schema.json` |
+| Seal store (stored at `<git-common-dir>/kura/seals/paths.json`) | `internal/seal/schema/seal_store.schema.json` |
 | Tools install metadata | `internal/tools/schema/tools_metadata.schema.json` |
 | Pre-commit component metadata | `internal/tools/schema/pre_commit_meta.schema.json` |
 

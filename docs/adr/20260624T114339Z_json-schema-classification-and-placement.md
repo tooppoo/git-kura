@@ -82,8 +82,8 @@ Internal contract schemas govern persisted state that git-kura reads and writes 
 
 Schemas in this class:
 
-- `internal/worktree/schema/metadata.schema.json` — worktree metadata persisted under `.git/kura/`
-- `internal/seal/schema/seal_store.schema.json` — seal store persisted under `.git/kura/`
+- `internal/worktree/schema/metadata.schema.json` — worktree metadata persisted at `<git-common-dir>/kura/meta/worktrees/<key>.json`
+- `internal/seal/schema/seal_store.schema.json` — seal store persisted at `<git-common-dir>/kura/seals/paths.json`
 - `internal/tools/schema/tools_metadata.schema.json` — tools install metadata
 - `internal/tools/schema/pre_commit_meta.schema.json` — pre-commit component metadata
 
