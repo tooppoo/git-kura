@@ -158,7 +158,7 @@ For example:
 
 This would keep metadata physically close to the worktree.
 
-This was not selected because the file would live inside a Git working tree and could be removed by `git clean -fdx` run inside that worktree. It would also add Kura-specific files to user workspaces.
+This was not selected because the file would live inside a Git working tree and could be removed by `git clean -fdx` run inside that worktree. It would also add Kura-specific files to user worktrees.
 
 ### Reconstruct all metadata from Git
 
