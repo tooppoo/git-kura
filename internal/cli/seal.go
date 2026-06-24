@@ -428,7 +428,7 @@ func (r *runner) runSealTest(args []string) error {
 	}
 	opts, paths, err := parseSealTestArgs(args)
 	if err != nil {
-		return err
+		return exitCodeError(exitUsageError, err)
 	}
 	return r.cmdSealTest(opts, paths)
 }

@@ -109,8 +109,13 @@ func preCommitSealCheck(worktreeRoot, currentKey, phase string) error {
 }
 
 // runPreviousPreCommit chains the user-defined pre-commit hook recorded at
-// install time. It intentionally uses os.Stdin/Stdout/Stderr for the subprocess
-// so the chained hook runs in the real terminal context.
+// install time.
+//
+// Design exception: the subprocess is wired to os.Stdin/Stdout/Stderr directly
+// rather than to r.stdout/r.stderr. This is intentional — the chained hook must
+// run in the real terminal context (interactive prompts, coloured output, pagers)
+// and its I/O cannot be captured through the injected writers. All diagnostic
+// output emitted by runPreviousPreCommit itself still goes through r.stderr.
 func (r *runner) runPreviousPreCommit(worktreeRoot, commonDir string, hookArgs []string) error {
 	storeFile, _, err := tools.MetadataPaths(worktreeRoot)
 	if err != nil {

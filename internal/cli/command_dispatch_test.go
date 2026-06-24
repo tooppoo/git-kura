@@ -134,3 +134,26 @@ func TestRunSealDoctorUsageErrorsUseExitCode2(t *testing.T) {
 		})
 	}
 }
+
+// TestUsageErrorsExitCode2 guards commands whose argument-error paths were
+// accidentally returning exit 1 instead of exit 2.
+func TestUsageErrorsExitCode2(t *testing.T) {
+	cases := [][]string{
+		{"close"},            // missing key
+		{"ls", "unexpected"}, // unexpected positional
+		{"seal", "test"},     // missing paths
+	}
+	for _, args := range cases {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			err := newTestRunner().run(args)
+			if err == nil {
+				t.Fatalf("run(%v) = nil, want usage error", args)
+			}
+			var xe *exitError
+			if !errors.As(err, &xe) || xe.code != int(exitUsageError) {
+				t.Fatalf("run(%v) exit code = %d, want %d (exitUsageError) err: %v",
+					args, xe.code, exitUsageError, err)
+			}
+		})
+	}
+}

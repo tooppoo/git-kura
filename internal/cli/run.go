@@ -161,7 +161,7 @@ func (r *runner) run(args []string) error {
 		}
 		key, opts, err := parseCloseArgs(args[1:])
 		if err != nil {
-			return err
+			return exitCodeError(exitUsageError, err)
 		}
 		return r.cmdClose(key, opts)
 
@@ -174,7 +174,7 @@ func (r *runner) run(args []string) error {
 		}
 		opts, err := parseLsArgs(args[1:])
 		if err != nil {
-			return err
+			return exitCodeError(exitUsageError, err)
 		}
 		return r.cmdLs(opts)
 
