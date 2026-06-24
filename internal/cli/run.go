@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/tooppoo/git-kura/internal/gitutil"
 	"github.com/tooppoo/git-kura/internal/output"
 	"github.com/tooppoo/git-kura/internal/seal"
@@ -109,83 +110,141 @@ Flags:
   --toon   Print structured output as a TOON envelope (experimental; AI-friendly)`
 
 func (r *runner) run(args []string) error {
-	if len(args) == 0 {
-		return exitCodeError(exitUsageError, fmt.Errorf("usage: git kura <command> [key] [flags]"))
+	var helpWriteErr error
+	root := r.buildRootCmd()
+	root.SetHelpFunc(func(_ *cobra.Command, _ []string) {
+		_, helpWriteErr = fmt.Fprintln(r.stdout, topLevelHelp)
+	})
+	root.SetArgs(args)
+	root.SetOut(r.stdout)
+	root.SetErr(r.stderr)
+	if err := root.Execute(); err != nil {
+		return err
+	}
+	return helpWriteErr
+}
+
+// buildRootCmd constructs the full Cobra command tree. SilenceErrors and
+// SilenceUsage suppress Cobra's own error printing so Run() controls all
+// output. SetFlagErrorFunc converts unknown-flag errors to exitUsageError so
+// they receive exit code 2 consistently with the hand-parsed commands.
+func (r *runner) buildRootCmd() *cobra.Command {
+	var versionFlag bool
+
+	root := &cobra.Command{
+		Use:           "git-kura",
+		Args:          cobra.ArbitraryArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if versionFlag {
+				_, err := fmt.Fprintln(r.stdout, r.version)
+				return err
+			}
+			if len(args) == 0 {
+				return exitCodeError(exitUsageError, fmt.Errorf("usage: git kura <command> [key] [flags]"))
+			}
+			return exitCodeError(exitUsageError, fmt.Errorf("unknown command: %s", args[0]))
+		},
 	}
 
-	switch args[0] {
-	case "-h", "--help":
-		if _, err := fmt.Fprintln(r.stdout, topLevelHelp); err != nil {
-			return err
-		}
-		return nil
+	root.Flags().BoolVarP(&versionFlag, "version", "v", false, "print version and exit")
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return exitCodeError(exitUsageError, err)
+	})
 
-	case "-v", "--version":
-		if _, err := fmt.Fprintln(r.stdout, r.version); err != nil {
-			return err
-		}
-		return nil
+	root.AddCommand(
+		r.buildGetCmd(),
+		r.buildOpenCmd(),
+		r.buildCloseCmd(),
+		r.buildLsCmd(),
+		r.buildSealCmd(),
+		r.buildToolsCmd(),
+	)
 
-	case "get":
-		if hasHelpFlag(args[1:]) {
-			if _, err := fmt.Fprintln(r.stdout, getHelp); err != nil {
-				return err
+	return root
+}
+
+// buildGetCmd returns the cobra command for "git kura get".
+// DisableFlagParsing passes all args to RunE so the existing parseGetArgs
+// function handles flag parsing; this preserves tests that call parseGetArgs
+// directly and maintains flag-placement behaviour.
+func (r *runner) buildGetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "get <key>",
+		Short:              "Print worktree path, branch, or structured metadata",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if hasHelpFlag(args) {
+				_, _ = fmt.Fprintln(r.stdout, getHelp)
+				return nil
 			}
-			return nil
-		}
-		key, opts, err := parseGetArgs(args[1:])
-		if err != nil {
-			return exitCodeError(exitUsageError, err)
-		}
-		return r.cmdGet(key, opts)
-
-	case "open":
-		if hasHelpFlag(args[1:]) {
-			if _, err := fmt.Fprintln(r.stdout, openHelp); err != nil {
-				return err
+			key, opts, err := parseGetArgs(args)
+			if err != nil {
+				return exitCodeError(exitUsageError, err)
 			}
-			return nil
-		}
-		key, opts, err := parseOpenArgs(args[1:])
-		if err != nil {
-			return exitCodeError(exitUsageError, err)
-		}
-		return r.cmdOpen(key, opts)
+			return r.cmdGet(key, opts)
+		},
+	}
+}
 
-	case "close":
-		if hasHelpFlag(args[1:]) {
-			if _, err := fmt.Fprintln(r.stdout, closeHelp); err != nil {
-				return err
+// buildOpenCmd returns the cobra command for "git kura open".
+func (r *runner) buildOpenCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "open <key>",
+		Short:              "Create a worktree for <key>",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if hasHelpFlag(args) {
+				_, _ = fmt.Fprintln(r.stdout, openHelp)
+				return nil
 			}
-			return nil
-		}
-		key, opts, err := parseCloseArgs(args[1:])
-		if err != nil {
-			return exitCodeError(exitUsageError, err)
-		}
-		return r.cmdClose(key, opts)
-
-	case "ls":
-		if hasHelpFlag(args[1:]) {
-			if _, err := fmt.Fprintln(r.stdout, lsHelp); err != nil {
-				return err
+			key, opts, err := parseOpenArgs(args)
+			if err != nil {
+				return exitCodeError(exitUsageError, err)
 			}
-			return nil
-		}
-		opts, err := parseLsArgs(args[1:])
-		if err != nil {
-			return exitCodeError(exitUsageError, err)
-		}
-		return r.cmdLs(opts)
+			return r.cmdOpen(key, opts)
+		},
+	}
+}
 
-	case "seal":
-		return r.runSeal(args[1:])
+// buildCloseCmd returns the cobra command for "git kura close".
+func (r *runner) buildCloseCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "close <key>",
+		Short:              "Remove the worktree for <key>",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if hasHelpFlag(args) {
+				_, _ = fmt.Fprintln(r.stdout, closeHelp)
+				return nil
+			}
+			key, opts, err := parseCloseArgs(args)
+			if err != nil {
+				return exitCodeError(exitUsageError, err)
+			}
+			return r.cmdClose(key, opts)
+		},
+	}
+}
 
-	case "tools":
-		return r.runTools(args[1:])
-
-	default:
-		return exitCodeError(exitUsageError, fmt.Errorf("unknown command: %s", args[0]))
+// buildLsCmd returns the cobra command for "git kura ls".
+func (r *runner) buildLsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "ls",
+		Short:              "List all open worktrees",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if hasHelpFlag(args) {
+				_, _ = fmt.Fprintln(r.stdout, lsHelp)
+				return nil
+			}
+			opts, err := parseLsArgs(args)
+			if err != nil {
+				return exitCodeError(exitUsageError, err)
+			}
+			return r.cmdLs(opts)
+		},
 	}
 }
 
