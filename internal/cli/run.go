@@ -176,8 +176,8 @@ func (r *runner) buildGetCmd() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if hasHelpFlag(args) {
-				_, _ = fmt.Fprintln(r.stdout, getHelp)
-				return nil
+				_, err := fmt.Fprintln(r.stdout, getHelp)
+				return err
 			}
 			key, opts, err := parseGetArgs(args)
 			if err != nil {
@@ -196,8 +196,8 @@ func (r *runner) buildOpenCmd() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if hasHelpFlag(args) {
-				_, _ = fmt.Fprintln(r.stdout, openHelp)
-				return nil
+				_, err := fmt.Fprintln(r.stdout, openHelp)
+				return err
 			}
 			key, opts, err := parseOpenArgs(args)
 			if err != nil {
@@ -216,8 +216,8 @@ func (r *runner) buildCloseCmd() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if hasHelpFlag(args) {
-				_, _ = fmt.Fprintln(r.stdout, closeHelp)
-				return nil
+				_, err := fmt.Fprintln(r.stdout, closeHelp)
+				return err
 			}
 			key, opts, err := parseCloseArgs(args)
 			if err != nil {
@@ -236,8 +236,8 @@ func (r *runner) buildLsCmd() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if hasHelpFlag(args) {
-				_, _ = fmt.Fprintln(r.stdout, lsHelp)
-				return nil
+				_, err := fmt.Fprintln(r.stdout, lsHelp)
+				return err
 			}
 			opts, err := parseLsArgs(args)
 			if err != nil {

@@ -318,18 +318,20 @@ Flags:
 // unit tests for those functions passing without modification.
 func (r *runner) buildSealCmd() *cobra.Command {
 	sealCmd := &cobra.Command{
-		Use:   "seal",
-		Short: "Manage path claims in the repository-wide seal store",
+		Use:                "seal",
+		Short:              "Manage path claims in the repository-wide seal store",
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if hasHelpFlag(args) {
+				_, err := fmt.Fprintln(r.stdout, sealHelp)
+				return err
+			}
 			if len(args) == 0 {
 				return exitCodeError(exitUsageError, fmt.Errorf("usage: git kura seal <subcommand> [args]"))
 			}
 			return exitCodeError(exitUsageError, fmt.Errorf("unknown seal subcommand: %s", args[0]))
 		},
 	}
-	sealCmd.SetHelpFunc(func(_ *cobra.Command, _ []string) {
-		_, _ = fmt.Fprintln(r.stdout, sealHelp)
-	})
 
 	sealCmd.AddCommand(
 		r.buildSealLsCmd(),
@@ -348,8 +350,8 @@ func (r *runner) buildSealLsCmd() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if hasHelpFlag(args) {
-				_, _ = fmt.Fprintln(r.stdout, sealLsHelp)
-				return nil
+				_, err := fmt.Fprintln(r.stdout, sealLsHelp)
+				return err
 			}
 			opts, err := parseSealLsArgs(args)
 			if err != nil {
@@ -367,8 +369,8 @@ func (r *runner) buildSealClaimCmd() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if hasHelpFlag(args) {
-				_, _ = fmt.Fprintln(r.stdout, sealClaimHelp)
-				return nil
+				_, err := fmt.Fprintln(r.stdout, sealClaimHelp)
+				return err
 			}
 			opts, paths, err := parseSealClaimArgs(args)
 			if err != nil {
@@ -386,8 +388,8 @@ func (r *runner) buildSealUnclaimCmd() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if hasHelpFlag(args) {
-				_, _ = fmt.Fprintln(r.stdout, sealUnclaimHelp)
-				return nil
+				_, err := fmt.Fprintln(r.stdout, sealUnclaimHelp)
+				return err
 			}
 			opts, paths, err := parseSealUnclaimArgs(args)
 			if err != nil {
@@ -405,8 +407,8 @@ func (r *runner) buildSealTestCmd() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if hasHelpFlag(args) {
-				_, _ = fmt.Fprintln(r.stdout, sealTestHelp)
-				return nil
+				_, err := fmt.Fprintln(r.stdout, sealTestHelp)
+				return err
 			}
 			opts, paths, err := parseSealTestArgs(args)
 			if err != nil {
@@ -424,8 +426,8 @@ func (r *runner) buildSealDoctorCmd() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if hasHelpFlag(args) {
-				_, _ = fmt.Fprintln(r.stdout, sealDoctorHelp)
-				return nil
+				_, err := fmt.Fprintln(r.stdout, sealDoctorHelp)
+				return err
 			}
 			opts, err := parseSealDoctorArgs(args)
 			if err != nil {

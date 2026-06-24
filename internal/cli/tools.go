@@ -131,21 +131,23 @@ func (r *runner) buildToolsCmd() *cobra.Command {
 
 func (r *runner) buildToolsCmdWith(deps toolsDeps) *cobra.Command {
 	toolsCmd := &cobra.Command{
-		Use:           "tools",
-		Args:          cobra.ArbitraryArgs,
-		Short:         "Install, remove, and inspect git-kura auxiliary tool components",
-		SilenceErrors: true,
-		SilenceUsage:  true,
+		Use:                "tools",
+		Args:               cobra.ArbitraryArgs,
+		Short:              "Install, remove, and inspect git-kura auxiliary tool components",
+		DisableFlagParsing: true,
+		SilenceErrors:      true,
+		SilenceUsage:       true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if hasHelpFlag(args) {
+				_, err := fmt.Fprintln(r.stdout, toolsHelp)
+				return err
+			}
 			if len(args) == 0 {
 				return usageError(fmt.Errorf("usage: git kura tools <subcommand> [component...]"))
 			}
 			return usageError(fmt.Errorf("unknown tools subcommand: %s", args[0]))
 		},
 	}
-	toolsCmd.SetHelpFunc(func(_ *cobra.Command, _ []string) {
-		_, _ = fmt.Fprintln(r.stdout, toolsHelp)
-	})
 	toolsCmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return usageError(err)
 	})
@@ -165,8 +167,8 @@ func (r *runner) buildToolsStatusCmd(deps toolsDeps) *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if hasHelpFlag(args) {
-				_, _ = fmt.Fprintln(r.stdout, toolsStatusHelp)
-				return nil
+				_, err := fmt.Fprintln(r.stdout, toolsStatusHelp)
+				return err
 			}
 			targets, err := parseToolsTargets(deps.registry, tools.CmdStatus, args)
 			if err != nil {
@@ -184,8 +186,8 @@ func (r *runner) buildToolsInstallCmd(deps toolsDeps) *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if hasHelpFlag(args) {
-				_, _ = fmt.Fprintln(r.stdout, toolsInstallHelp)
-				return nil
+				_, err := fmt.Fprintln(r.stdout, toolsInstallHelp)
+				return err
 			}
 			targets, err := parseToolsTargets(deps.registry, tools.CmdInstall, args)
 			if err != nil {
@@ -203,8 +205,8 @@ func (r *runner) buildToolsUninstallCmd(deps toolsDeps) *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if hasHelpFlag(args) {
-				_, _ = fmt.Fprintln(r.stdout, toolsUninstallHelp)
-				return nil
+				_, err := fmt.Fprintln(r.stdout, toolsUninstallHelp)
+				return err
 			}
 			targets, err := parseToolsTargets(deps.registry, tools.CmdUninstall, args)
 			if err != nil {
