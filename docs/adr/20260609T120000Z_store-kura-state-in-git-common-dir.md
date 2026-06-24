@@ -7,7 +7,7 @@
 
 Kura needs durable local state for worktrees and metadata. That state must survive `git clean -fdx`, because metadata such as `baseBranch` cannot always be reconstructed after a worktree is opened.
 
-The previous design stored state in a sibling directory named `<repo>.kura/`. That kept state outside the working tree, but it assumes the repository parent directory is writable. In devcontainers and other managed workspaces, the repository itself may be writable while its parent directory is not. In those environments, `git kura open <key>` can fail with permission errors while creating `<repo>.kura/`.
+The previous design stored state in a sibling directory named `<repo>.kura/`. That kept state outside the working tree, but it assumes the repository parent directory is writable. In devcontainers and other managed environments, the repository itself may be writable while its parent directory is not. In those environments, `git kura open <key>` can fail with permission errors while creating `<repo>.kura/`.
 
 ## Decision
 

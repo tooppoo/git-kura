@@ -15,9 +15,9 @@ git kura get fizz               # print the open worktree path for "fizz"
 git kura get fizz --path        # print the worktree path for "fizz"
 git kura get fizz --branch      # print the branch name for "fizz"
 git kura get fizz --root        # print the repository root path
-git kura get fizz --format json # print workspace metadata as JSON
+git kura get fizz --format json # print worktree metadata as JSON
 git kura get fizz --json        # alias of `--format json`
-git kura get fizz --format toon # print workspace metadata as TOON for AI prompts
+git kura get fizz --format toon # print worktree metadata as TOON for AI prompts
 git kura get fizz --toon        # alias of `--format toon`
 git kura close fizz             # remove the worktree for "fizz"
 git kura ls                     # list all open worktrees
@@ -44,7 +44,7 @@ git kura open 51 --dry-run
 git kura open 51 --dry-run --json
 ```
 
-If the corresponding branch or worktree already exists, Kura should not create a conflicting workspace.
+If the corresponding branch or worktree already exists, Kura should not create a conflicting worktree.
 
 `--dry-run` does not create the branch, worktree, or metadata. On its own it prints human-readable output showing the planned worktree path, branch, repository root, and base branch. With `--json` it prints the common output envelope instead, with the planned worktree under `data`.
 

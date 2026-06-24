@@ -35,7 +35,7 @@
     "kind": {
       "type": "string",
       "enum": ["worktree"],
-      "description": "Workspace kind."
+      "description": "Worktree kind."
     },
     "branch": {
       "type": "string",

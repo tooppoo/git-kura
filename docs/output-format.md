@@ -110,7 +110,7 @@ data:
 warnings[0]:
 ```
 
-TOON output is written to **stdout** on both success and failure, matching JSON behaviour. The whitespace, line order, and field rendering are not part of the stable contract — only the JSON envelope schema and the JSON command-data schema are stable. Use TOON when passing workspace context to an LLM prompt or coding agent; use `--json` for scripts and external tooling.
+TOON output is written to **stdout** on both success and failure, matching JSON behaviour. The whitespace, line order, and field rendering are not part of the stable contract — only the JSON envelope schema and the JSON command-data schema are stable. Use TOON when passing worktree context to an LLM prompt or coding agent; use `--json` for scripts and external tooling.
 
 All commands that support `--json` also support `--toon`. The two flags are mutually exclusive; combining them is a usage error.
 

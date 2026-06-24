@@ -40,7 +40,7 @@ order. Never start editing before claiming the files you intend to change.
    ```
 
    If `git kura open <key>` reports that the branch or worktree already exists,
-   do not create an alternate workspace. Reuse the existing one.
+   do not create an alternate worktree. Reuse the existing one.
 
 2. Move into the worktree:
 
@@ -206,7 +206,7 @@ run the remaining checks.
 - Do not implement directly in the repository root when a Kura worktree can be
   used.
 - Do not guess Kura worktree paths manually.
-- Do not use `cd ../...` to find another task workspace.
+- Do not use `cd ../...` to find another task worktree.
 - Do not edit a file before claiming it with `git kura seal claim`.
 - Do not unclaim or override another key's seal to work around a conflict;
   report the conflict and stop instead.
