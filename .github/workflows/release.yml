@@ -29,7 +29,7 @@ jobs:
         uses: sigstore/cosign-installer@v3
 
       - name: Check
-        run: make check
+        run: make ci
 
       - name: Save licenses
         run: make license-save
