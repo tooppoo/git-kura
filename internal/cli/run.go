@@ -132,10 +132,11 @@ func (r *runner) buildRootCmd() *cobra.Command {
 	var versionFlag bool
 
 	root := &cobra.Command{
-		Use:           "git-kura",
-		Args:          cobra.ArbitraryArgs,
-		SilenceErrors: true,
-		SilenceUsage:  true,
+		Use:               "git-kura",
+		Args:              cobra.ArbitraryArgs,
+		SilenceErrors:     true,
+		SilenceUsage:      true,
+		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if versionFlag {
 				_, err := fmt.Fprintln(r.stdout, r.version)

@@ -151,12 +151,30 @@ func TestRunSealDoctorUsageErrorsUseExitCode2(t *testing.T) {
 	}
 }
 
+// TestCompletionCommandDisabled guards that Cobra's built-in shell-completion
+// command is not exposed as a user-facing feature (issue #78 scope).
+func TestCompletionCommandDisabled(t *testing.T) {
+	for _, args := range [][]string{
+		{"completion"},
+		{"completion", "bash"},
+		{"completion", "zsh"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			code := Run(args, io.Discard, io.Discard, testVersion)
+			if code == exitSuccess {
+				t.Fatalf("Run(%v) = exitSuccess, want non-zero (completion must not be exposed)", args)
+			}
+		})
+	}
+}
+
 // TestUsageErrorsExitCode2 guards commands whose argument-error paths were
 // accidentally returning exit 1 instead of exit 2.
 func TestUsageErrorsExitCode2(t *testing.T) {
 	cases := [][]string{
 		{},                   // no command
 		{"frobnicate"},       // unknown top-level command
+		{"completion"},       // cobra default completion must not be reachable
 		{"close"},            // missing key
 		{"ls", "unexpected"}, // unexpected positional
 		{"seal"},             // seal with no subcommand
