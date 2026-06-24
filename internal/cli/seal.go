@@ -313,7 +313,7 @@ Flags:
 
 func (r *runner) runSeal(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: git kura seal <subcommand> [args]")
+		return exitCodeError(exitUsageError, fmt.Errorf("usage: git kura seal <subcommand> [args]"))
 	}
 
 	switch args[0] {
@@ -343,7 +343,7 @@ func (r *runner) runSeal(args []string) error {
 	case "doctor":
 		return r.runSealDoctor(args[1:])
 	default:
-		return fmt.Errorf("unknown seal subcommand: %s", args[0])
+		return exitCodeError(exitUsageError, fmt.Errorf("unknown seal subcommand: %s", args[0]))
 	}
 }
 

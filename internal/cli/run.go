@@ -110,7 +110,7 @@ Flags:
 
 func (r *runner) run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: git kura <command> [key] [flags]")
+		return exitCodeError(exitUsageError, fmt.Errorf("usage: git kura <command> [key] [flags]"))
 	}
 
 	switch args[0] {
@@ -185,7 +185,7 @@ func (r *runner) run(args []string) error {
 		return r.runTools(args[1:])
 
 	default:
-		return fmt.Errorf("unknown command: %s", args[0])
+		return exitCodeError(exitUsageError, fmt.Errorf("unknown command: %s", args[0]))
 	}
 }
 

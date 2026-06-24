@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -23,9 +24,10 @@ func TestRunEntrypoint(t *testing.T) {
 	})
 
 	t.Run("exitError returns its code", func(t *testing.T) {
+		// Unknown command is a usage error (exit 2), exercising the exitError path in Run.
 		code := Run([]string{"unknown"}, io.Discard, io.Discard, testVersion)
-		if code != exitGeneralError {
-			t.Fatalf("Run(unknown) = %d, want exitGeneralError", code)
+		if code != exitUsageError {
+			t.Fatalf("Run(unknown) = %d, want exitUsageError", code)
 		}
 	})
 
@@ -48,7 +50,21 @@ func TestRunEntrypoint(t *testing.T) {
 			t.Fatalf("Run(seal ls --json outside repo) = exitSuccess, want error code")
 		}
 	})
+
+	t.Run("plain stdout error returns exitGeneralError", func(t *testing.T) {
+		// A broken stdout writer causes the help-print to return a plain (non-exitError)
+		// error, exercising the Run() fallthrough to exitGeneralError.
+		code := Run([]string{"-h"}, &brokenWriter{}, io.Discard, testVersion)
+		if code != exitGeneralError {
+			t.Fatalf("Run(-h with broken stdout) = %d, want exitGeneralError", code)
+		}
+	})
 }
+
+// brokenWriter always returns an error on Write, used to simulate stdout failures.
+type brokenWriter struct{}
+
+func (brokenWriter) Write([]byte) (int, error) { return 0, fmt.Errorf("write failed") }
 
 func TestRunHelpAndUsage(t *testing.T) {
 	for _, tc := range []struct {
@@ -139,8 +155,12 @@ func TestRunSealDoctorUsageErrorsUseExitCode2(t *testing.T) {
 // accidentally returning exit 1 instead of exit 2.
 func TestUsageErrorsExitCode2(t *testing.T) {
 	cases := [][]string{
+		{},                   // no command
+		{"frobnicate"},       // unknown top-level command
 		{"close"},            // missing key
 		{"ls", "unexpected"}, // unexpected positional
+		{"seal"},             // seal with no subcommand
+		{"seal", "bogus"},    // unknown seal subcommand
 		{"seal", "test"},     // missing paths
 	}
 	for _, args := range cases {
