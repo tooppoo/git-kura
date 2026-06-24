@@ -1,6 +1,6 @@
 # JSON Schema for `git kura get --json` Output
 
-- Status: Accepted
+- Status: Superseded by [20260624T114339Z_json-schema-classification-and-placement.md](20260624T114339Z_json-schema-classification-and-placement.md)
 - Created: 2026-06-09T00:51:36Z
 
 ## Context
