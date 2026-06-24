@@ -36,7 +36,7 @@ All existing features are already expressed cleanly through the `worktree`, `sea
 `worktree` could refer to the raw Git worktree and `workspace` to the git-kura managed view of it.
 
 This was not selected because the distinction is not meaningful to users.
-git-kura always manages its worktrees; there is no unmanaged worktree concept in the project.
+Introducing `workspace` as a separate term for the managed view adds no expressive power; `worktree` already covers that meaning.
 Two terms for the same thing increase cognitive load and create inconsistency in documentation and code search.
 
 ## Consequences
