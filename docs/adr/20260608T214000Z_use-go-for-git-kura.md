@@ -157,7 +157,7 @@ The same internal metadata object must be used to generate both JSON and TOON ou
 Example metadata model:
 
 ```go
-type WorkspaceMetadata struct {
+type WorktreeMetadata struct {
     SchemaVersion  int    `json:"schemaVersion" toon:"schemaVersion"`
     Key            string `json:"key" toon:"key"`
     Kind           string `json:"kind" toon:"kind"`
