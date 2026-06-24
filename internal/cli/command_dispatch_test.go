@@ -161,6 +161,8 @@ func TestCobraBuiltinCommandsDisabled(t *testing.T) {
 		{"completion", "zsh"},
 		{"help"},
 		{"help", "get"},
+		{"__complete", ""},
+		{"__completeNoDesc", ""},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			code := Run(args, io.Discard, io.Discard, testVersion)
@@ -175,15 +177,17 @@ func TestCobraBuiltinCommandsDisabled(t *testing.T) {
 // accidentally returning exit 1 instead of exit 2.
 func TestUsageErrorsExitCode2(t *testing.T) {
 	cases := [][]string{
-		{},                   // no command
-		{"frobnicate"},       // unknown top-level command
-		{"completion"},       // cobra default completion must not be reachable
-		{"help"},             // cobra default help subcommand must not be reachable
-		{"close"},            // missing key
-		{"ls", "unexpected"}, // unexpected positional
-		{"seal"},             // seal with no subcommand
-		{"seal", "bogus"},    // unknown seal subcommand
-		{"seal", "test"},     // missing paths
+		{},                       // no command
+		{"frobnicate"},           // unknown top-level command
+		{"completion"},           // cobra default completion must not be reachable
+		{"help"},                 // cobra default help subcommand must not be reachable
+		{"__complete", ""},       // cobra hidden completion endpoint must not be reachable
+		{"__completeNoDesc", ""}, // cobra hidden completion endpoint must not be reachable
+		{"close"},                // missing key
+		{"ls", "unexpected"},     // unexpected positional
+		{"seal"},                 // seal with no subcommand
+		{"seal", "bogus"},        // unknown seal subcommand
+		{"seal", "test"},         // missing paths
 	}
 	for _, args := range cases {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {

@@ -165,9 +165,30 @@ func (r *runner) buildRootCmd() *cobra.Command {
 		r.buildLsCmd(),
 		r.buildSealCmd(),
 		r.buildToolsCmd(),
+		// Pre-register hidden stubs for cobra's shell-completion endpoints so
+		// that when initCompleteCmd adds its own __complete command during
+		// Execute(), findNext sees two matches and returns nil. cobra's check
+		// then removes its own copy, and only our stubs remain — returning
+		// exit 2 for both endpoints, matching pre-cobra behaviour.
+		buildShellCompStub(cobra.ShellCompRequestCmd),
+		buildShellCompStub(cobra.ShellCompNoDescRequestCmd),
 	)
 
 	return root
+}
+
+// buildShellCompStub returns a hidden command that blocks cobra's built-in
+// shell-completion endpoint (name is "__complete" or "__completeNoDesc") by
+// returning a usage error so the invocation exits 2, matching pre-cobra
+// behaviour where these names were unknown commands.
+func buildShellCompStub(name string) *cobra.Command {
+	return &cobra.Command{
+		Use:    name,
+		Hidden: true,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return exitCodeError(exitUsageError, fmt.Errorf("unknown command: %s", name))
+		},
+	}
 }
 
 // buildGetCmd returns the cobra command for "git kura get".
