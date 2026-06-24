@@ -153,6 +153,10 @@ func (r *runner) buildRootCmd() *cobra.Command {
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return exitCodeError(exitUsageError, err)
 	})
+	// Disable cobra's default "help" subcommand. Its name is set to something
+	// other than "help" so that findNext("help") returns nil and root's RunE
+	// handles it as an unknown command (exit 2), matching pre-cobra behaviour.
+	root.SetHelpCommand(&cobra.Command{Hidden: true})
 
 	root.AddCommand(
 		r.buildGetCmd(),
