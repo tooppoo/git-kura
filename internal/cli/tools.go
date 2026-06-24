@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/tooppoo/git-kura/internal/gitutil"
 	"github.com/tooppoo/git-kura/internal/seal"
 	"github.com/tooppoo/git-kura/internal/tools"
@@ -108,55 +109,123 @@ func (r *runner) runTools(args []string) error {
 }
 
 func (r *runner) runToolsWith(deps toolsDeps, args []string) error {
-	if len(args) == 0 {
-		return usageError(fmt.Errorf("usage: git kura tools <subcommand> [component...]"))
+	cmd := r.buildToolsCmdWith(deps)
+	cmd.SetArgs(args)
+	cmd.SetOut(r.stdout)
+	cmd.SetErr(r.stderr)
+	return cmd.Execute()
+}
+
+func (r *runner) buildToolsCmd() *cobra.Command {
+	reg, err := tools.ProductionRegistry()
+	if err != nil {
+		panic(fmt.Sprintf("production tools registry: %v", err))
 	}
-	switch args[0] {
-	case "-h", "--help":
-		if _, err := fmt.Fprintln(r.stdout, toolsHelp); err != nil {
-			return err
-		}
-		return nil
-	case "status":
-		if hasHelpFlag(args[1:]) {
-			if _, err := fmt.Fprintln(r.stdout, toolsStatusHelp); err != nil {
+	deps := toolsDeps{
+		registry: reg,
+		fetcher:  tools.NewGithubReleaseFetcher(),
+		version:  r.version,
+	}
+	return r.buildToolsCmdWith(deps)
+}
+
+func (r *runner) buildToolsCmdWith(deps toolsDeps) *cobra.Command {
+	toolsCmd := &cobra.Command{
+		Use:                "tools",
+		Args:               cobra.ArbitraryArgs,
+		Short:              "Install, remove, and inspect git-kura auxiliary tool components",
+		DisableFlagParsing: true,
+		SilenceErrors:      true,
+		SilenceUsage:       true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if hasHelpFlag(args) {
+				_, err := fmt.Fprintln(r.stdout, toolsHelp)
 				return err
 			}
-			return nil
-		}
-		targets, err := parseToolsTargets(deps.registry, tools.CmdStatus, args[1:])
-		if err != nil {
-			return err
-		}
-		return r.cmdToolsStatus(deps, targets)
-	case "install":
-		if hasHelpFlag(args[1:]) {
-			if _, err := fmt.Fprintln(r.stdout, toolsInstallHelp); err != nil {
+			if len(args) == 0 {
+				return usageError(fmt.Errorf("usage: git kura tools <subcommand> [component...]"))
+			}
+			return usageError(fmt.Errorf("unknown tools subcommand: %s", args[0]))
+		},
+	}
+	toolsCmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return usageError(err)
+	})
+	toolsCmd.AddCommand(
+		r.buildToolsStatusCmd(deps),
+		r.buildToolsInstallCmd(deps),
+		r.buildToolsUninstallCmd(deps),
+		r.buildToolsRunCmd(),
+	)
+	return toolsCmd
+}
+
+func (r *runner) buildToolsStatusCmd(deps toolsDeps) *cobra.Command {
+	return &cobra.Command{
+		Use:                "status [component...]",
+		Short:              "Show the install state of components",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if hasHelpFlag(args) {
+				_, err := fmt.Fprintln(r.stdout, toolsStatusHelp)
 				return err
 			}
-			return nil
-		}
-		targets, err := parseToolsTargets(deps.registry, tools.CmdInstall, args[1:])
-		if err != nil {
-			return err
-		}
-		return r.cmdToolsInstall(deps, targets)
-	case "uninstall":
-		if hasHelpFlag(args[1:]) {
-			if _, err := fmt.Fprintln(r.stdout, toolsUninstallHelp); err != nil {
+			targets, err := parseToolsTargets(deps.registry, tools.CmdStatus, args)
+			if err != nil {
 				return err
 			}
-			return nil
-		}
-		targets, err := parseToolsTargets(deps.registry, tools.CmdUninstall, args[1:])
-		if err != nil {
-			return err
-		}
-		return r.cmdToolsUninstall(deps, targets)
-	case "run":
-		return r.runToolsRun(args[1:])
-	default:
-		return usageError(fmt.Errorf("unknown tools subcommand: %s", args[0]))
+			return r.cmdToolsStatus(deps, targets)
+		},
+	}
+}
+
+func (r *runner) buildToolsInstallCmd(deps toolsDeps) *cobra.Command {
+	return &cobra.Command{
+		Use:                "install <component...>",
+		Short:              "Install one or more components",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if hasHelpFlag(args) {
+				_, err := fmt.Fprintln(r.stdout, toolsInstallHelp)
+				return err
+			}
+			targets, err := parseToolsTargets(deps.registry, tools.CmdInstall, args)
+			if err != nil {
+				return err
+			}
+			return r.cmdToolsInstall(deps, targets)
+		},
+	}
+}
+
+func (r *runner) buildToolsUninstallCmd(deps toolsDeps) *cobra.Command {
+	return &cobra.Command{
+		Use:                "uninstall <component...>",
+		Short:              "Remove one or more components",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if hasHelpFlag(args) {
+				_, err := fmt.Fprintln(r.stdout, toolsUninstallHelp)
+				return err
+			}
+			targets, err := parseToolsTargets(deps.registry, tools.CmdUninstall, args)
+			if err != nil {
+				return err
+			}
+			return r.cmdToolsUninstall(deps, targets)
+		},
+	}
+}
+
+func (r *runner) buildToolsRunCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "run",
+		Short:              "Run tools hooks",
+		Hidden:             true,
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return r.runToolsRun(args)
+		},
 	}
 }
 

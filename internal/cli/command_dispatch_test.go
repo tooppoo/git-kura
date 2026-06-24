@@ -151,17 +151,43 @@ func TestRunSealDoctorUsageErrorsUseExitCode2(t *testing.T) {
 	}
 }
 
+// TestCobraBuiltinCommandsDisabled guards that Cobra's built-in shell-completion
+// and help subcommands are not exposed as user-facing features (issue #78 scope).
+// Both should behave like any other unknown command (non-zero exit).
+func TestCobraBuiltinCommandsDisabled(t *testing.T) {
+	for _, args := range [][]string{
+		{"completion"},
+		{"completion", "bash"},
+		{"completion", "zsh"},
+		{"help"},
+		{"help", "get"},
+		{"__complete", ""},
+		{"__completeNoDesc", ""},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			code := Run(args, io.Discard, io.Discard, testVersion)
+			if code == exitSuccess {
+				t.Fatalf("Run(%v) = exitSuccess, want non-zero (cobra built-in must not be exposed)", args)
+			}
+		})
+	}
+}
+
 // TestUsageErrorsExitCode2 guards commands whose argument-error paths were
 // accidentally returning exit 1 instead of exit 2.
 func TestUsageErrorsExitCode2(t *testing.T) {
 	cases := [][]string{
-		{},                   // no command
-		{"frobnicate"},       // unknown top-level command
-		{"close"},            // missing key
-		{"ls", "unexpected"}, // unexpected positional
-		{"seal"},             // seal with no subcommand
-		{"seal", "bogus"},    // unknown seal subcommand
-		{"seal", "test"},     // missing paths
+		{},                       // no command
+		{"frobnicate"},           // unknown top-level command
+		{"completion"},           // cobra default completion must not be reachable
+		{"help"},                 // cobra default help subcommand must not be reachable
+		{"__complete", ""},       // cobra hidden completion endpoint must not be reachable
+		{"__completeNoDesc", ""}, // cobra hidden completion endpoint must not be reachable
+		{"close"},                // missing key
+		{"ls", "unexpected"},     // unexpected positional
+		{"seal"},                 // seal with no subcommand
+		{"seal", "bogus"},        // unknown seal subcommand
+		{"seal", "test"},         // missing paths
 	}
 	for _, args := range cases {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {

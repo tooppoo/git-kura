@@ -9,6 +9,7 @@ tool (
 
 require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	github.com/spf13/cobra v1.7.0
 	github.com/toon-format/toon-go v0.0.0-20251202084852-7ca0e27c4e8c
 )
 
@@ -21,7 +22,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/otiai10/copy v1.10.0 // indirect
 	github.com/sergi/go-diff v1.2.0 // indirect
-	github.com/spf13/cobra v1.7.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/mod v0.35.0 // indirect
