@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/cmd/git-kura/schema/commands/seal_test.schema.json",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/internal/cli/schema/commands/seal_test.schema.json",
   "title": "git kura seal test — envelope data",
   "description": "Command-specific schema for the data payload of `git kura seal test --json <path...>`, nested under the common envelope's data field.",
   "type": "object",

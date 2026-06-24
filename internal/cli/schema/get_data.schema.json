@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/cmd/git-kura/schema/get_data.schema.json",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/internal/cli/schema/get_data.schema.json",
   "title": "git kura get — envelope data",
   "description": "Command-specific schema for the data payload of `git kura get --json` / `--format json`, nested under the common envelope's data field.",
   "type": "object",

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/cmd/git-kura/schema/commands/open.schema.json",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/internal/cli/schema/commands/open.schema.json",
   "title": "git kura open — envelope data",
   "description": "Command-specific schema for the data payload of `git kura open --json` (both dry-run and actual open), nested under the common envelope's data field.",
   "type": "object",

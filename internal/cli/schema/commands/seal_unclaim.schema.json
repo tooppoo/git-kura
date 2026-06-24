@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/cmd/git-kura/schema/commands/seal_unclaim.schema.json",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/internal/cli/schema/commands/seal_unclaim.schema.json",
   "title": "git kura seal unclaim — envelope data",
   "description": "Command-specific schema for the data payload of `git kura seal unclaim --json <path...>`, nested under the common envelope's data field. seal unclaim is all-or-nothing: either all paths are processed or none are.",
   "type": "object",

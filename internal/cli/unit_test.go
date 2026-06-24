@@ -895,7 +895,7 @@ func TestWrittenSealStoreConformsToSchema(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	schemaDoc, err := jsonschema.UnmarshalJSON(strings.NewReader(readFileString(t, filepath.Join("schema", "seal_store.schema.json"))))
+	schemaDoc, err := jsonschema.UnmarshalJSON(strings.NewReader(readFileString(t, filepath.Join("..", "seal", "schema", "seal_store.schema.json"))))
 	if err != nil {
 		t.Fatalf("parse schema: %v", err)
 	}
