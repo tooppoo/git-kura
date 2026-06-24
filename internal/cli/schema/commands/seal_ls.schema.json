@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/internal/cli/schema/commands/seal_ls.schema.json",
+  "title": "git kura seal ls — envelope data",
+  "description": "Command-specific schema for the data payload of `git kura seal ls --json` and `git kura seal ls --json <key>`, nested under the common envelope's data field.",
+  "type": "object",
+  "required": ["filterKey", "claims"],
+  "additionalProperties": false,
+  "properties": {
+    "filterKey": {
+      "description": "The key filter argument, or null for project-wide listing.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        { "type": "null" }
+      ]
+    },
+    "claims": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/claim" },
+      "description": "Claimed paths, sorted by key then path."
+    }
+  },
+  "$defs": {
+    "claim": {
+      "type": "object",
+      "required": ["key", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The key that holds this claim."
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repository-root relative path with / separators."
+        }
+      }
+    }
+  }
+}

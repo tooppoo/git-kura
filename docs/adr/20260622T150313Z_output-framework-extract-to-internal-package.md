@@ -40,7 +40,7 @@ This co-locates the schema with the code that uses it for runtime validation (`/
 The schema's `$id` must be updated to reflect the new canonical path:
 `https://raw.githubusercontent.com/tooppoo/git-kura/main/internal/output/schema/envelope.schema.json`
 
-Command-specific `data` and `error.details` schemas (e.g., `get_data.schema.json`, `open_dry_run_data.schema.json`) remain in `cmd/git-kura/schema/` because they are consumed by CLI-level tests, not by the framework package itself.
+Command-specific `data` and `error.details` schemas (e.g., `get_data.schema.json`) remain outside the output framework package because they are consumed by CLI-level code and tests, not by the framework package itself. They were later moved to `internal/cli/schema/` when the CLI shell was extracted from `cmd/git-kura`.
 
 ### Coverage requirement
 

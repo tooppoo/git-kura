@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/internal/cli/schema/commands/seal_test.schema.json",
+  "title": "git kura seal test — envelope data",
+  "description": "Command-specific schema for the data payload of `git kura seal test --json <path...>`, nested under the common envelope's data field.",
+  "type": "object",
+  "required": ["currentKey", "passed", "results"],
+  "additionalProperties": false,
+  "properties": {
+    "currentKey": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The key derived from the current managed worktree."
+    },
+    "passed": {
+      "type": "boolean",
+      "description": "True when no path is claimed by a different key. False when at least one path has status claimed-by-other-key."
+    },
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/result" },
+      "description": "Per-path inspection results, in the same order as the input paths."
+    }
+  },
+  "$defs": {
+    "result": {
+      "type": "object",
+      "required": ["path", "status", "safe", "claimedBy"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repository-root relative path with / separators."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "claimed-by-current-key",
+            "claimed-by-other-key",
+            "unclaimed",
+            "missing-path"
+          ],
+          "description": "Stable status token for this path."
+        },
+        "safe": {
+          "type": "boolean",
+          "description": "True when this path is safe to edit in the current seal context."
+        },
+        "claimedBy": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ],
+          "description": "The key that claims this path, or null if unclaimed or missing."
+        }
+      }
+    }
+  }
+}
