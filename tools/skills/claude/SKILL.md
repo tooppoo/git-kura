@@ -18,15 +18,7 @@ Use this skill before any task that involves reviewing or changing repository fi
 
 Editing an issue body, adding a comment, creating subissues, or converting an issue into a tracking issue — unless these are part of a repository file-changing workflow.
 
-## Two Modes
-
-### Using git-kura in a target repository
-
-When working in a repository that uses git-kura, git-kura is the source of truth for resolving task keys, branches, and worktree paths. Do not create ad-hoc worktrees or branches when git-kura should manage them.
-
-### Maintaining the git-kura repository itself
-
-When the task involves changing the git-kura repository itself — implementing a CLI feature, updating documentation, or changing skill prompts — apply the same workflow: open a worktree via `git kura open <key>`, claim the files you will change, then edit them.
+git-kura is the source of truth for resolving task keys, branches, and worktree paths. Do not create ad-hoc worktrees or branches when git-kura should manage them.
 
 # Key Selection
 
