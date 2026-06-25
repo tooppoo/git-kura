@@ -95,11 +95,27 @@ func safetyGate(plan *schema.ReleasePlanEnvelope, result *schema.ValidateResult,
 	if result.Status != schema.ValidateStatusSuccess {
 		return fmt.Errorf("validate result status is %q, not %q: re-run validate after fixing errors", result.Status, schema.ValidateStatusSuccess)
 	}
+	// Verify that the payload's targetVersion and stepName match the CLI args so
+	// that a tampered payload with a recomputed hash cannot bypass the gate.
+	if plan.Payload.TargetVersion != version {
+		return fmt.Errorf("plan payload targetVersion %q does not match requested version %q", plan.Payload.TargetVersion, version)
+	}
+	if plan.Payload.StepName != stepName {
+		return fmt.Errorf("plan payload stepName %q does not match requested step %q", plan.Payload.StepName, stepName)
+	}
 	if result.TargetVersion != version {
 		return fmt.Errorf("version mismatch: validate result has %q, expected %q", result.TargetVersion, version)
 	}
 	if result.StepName != stepName {
 		return fmt.Errorf("step mismatch: validate result has %q, expected %q", result.StepName, stepName)
+	}
+	// Cross-check payload against result so the result cannot claim a different
+	// version or step than what the plan payload actually specifies.
+	if result.TargetVersion != plan.Payload.TargetVersion {
+		return fmt.Errorf("validate result targetVersion %q does not match plan payload targetVersion %q", result.TargetVersion, plan.Payload.TargetVersion)
+	}
+	if result.StepName != plan.Payload.StepName {
+		return fmt.Errorf("validate result stepName %q does not match plan payload stepName %q", result.StepName, plan.Payload.StepName)
 	}
 	if result.PlanID != plan.PlanID {
 		return fmt.Errorf("planId mismatch: validate result was for plan %q but current plan is %q (re-run validate)", result.PlanID, plan.PlanID)

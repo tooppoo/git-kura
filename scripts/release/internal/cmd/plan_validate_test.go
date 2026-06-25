@@ -447,6 +447,83 @@ func TestNewRootCommand_Validate_TamperedPayload(t *testing.T) {
 	}
 }
 
+// TestExecRelease_SafetyGate_PayloadVersionMismatch verifies that exec rejects
+// a plan whose payload.targetVersion has been changed to a different version
+// even when the attacker has also updated payloadHash to match the new payload.
+func TestExecRelease_SafetyGate_PayloadVersionMismatch(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+
+	version, stepName := "v0.0.1", "tag"
+	tracker := &noopExecTracker{}
+	registry := setupExecFixture(t, version, stepName, tracker)
+
+	// Change payload.targetVersion and recompute payloadHash so the envelope
+	// is internally consistent — this is the attack the gate must block.
+	planPath := filepath.Join(".git-kura", "release", version, stepName, "plan.json")
+	b, _ := os.ReadFile(planPath)
+	var envelope schema.ReleasePlanEnvelope
+	_ = json.Unmarshal(b, &envelope)
+	envelope.Payload.TargetVersion = "v9.9.9"
+	newHash := testPayloadHash(t, envelope.Payload)
+	envelope.PayloadHash = newHash
+	out, _ := json.MarshalIndent(envelope, "", "  ")
+	_ = os.WriteFile(planPath, out, 0o644)
+
+	// Update result to use the new hash so result.PayloadHash == plan.PayloadHash.
+	resultPath := filepath.Join(".git-kura", "release", version, stepName, "validate-result.json")
+	rb, _ := os.ReadFile(resultPath)
+	var result schema.ValidateResult
+	_ = json.Unmarshal(rb, &result)
+	result.PayloadHash = newHash
+	rout, _ := json.MarshalIndent(result, "", "  ")
+	_ = os.WriteFile(resultPath, rout, 0o644)
+
+	if err := cmd.ExecRelease(registry, version, stepName); err == nil {
+		t.Fatal("expected error: payload.targetVersion differs from CLI --version even with consistent payloadHash")
+	}
+	if tracker.execCalled {
+		t.Fatal("Exec must not be called when payload targetVersion mismatches CLI arg")
+	}
+}
+
+// TestExecRelease_SafetyGate_PayloadStepMismatch verifies that exec rejects
+// a plan whose payload.stepName has been changed even when payloadHash is
+// recomputed to match the tampered payload.
+func TestExecRelease_SafetyGate_PayloadStepMismatch(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+
+	version, stepName := "v0.0.1", "tag"
+	tracker := &noopExecTracker{}
+	registry := setupExecFixture(t, version, stepName, tracker)
+
+	planPath := filepath.Join(".git-kura", "release", version, stepName, "plan.json")
+	b, _ := os.ReadFile(planPath)
+	var envelope schema.ReleasePlanEnvelope
+	_ = json.Unmarshal(b, &envelope)
+	envelope.Payload.StepName = "scoop"
+	newHash := testPayloadHash(t, envelope.Payload)
+	envelope.PayloadHash = newHash
+	out, _ := json.MarshalIndent(envelope, "", "  ")
+	_ = os.WriteFile(planPath, out, 0o644)
+
+	resultPath := filepath.Join(".git-kura", "release", version, stepName, "validate-result.json")
+	rb, _ := os.ReadFile(resultPath)
+	var result schema.ValidateResult
+	_ = json.Unmarshal(rb, &result)
+	result.PayloadHash = newHash
+	rout, _ := json.MarshalIndent(result, "", "  ")
+	_ = os.WriteFile(resultPath, rout, 0o644)
+
+	if err := cmd.ExecRelease(registry, version, stepName); err == nil {
+		t.Fatal("expected error: payload.stepName differs from CLI --step even with consistent payloadHash")
+	}
+	if tracker.execCalled {
+		t.Fatal("Exec must not be called when payload stepName mismatches CLI arg")
+	}
+}
+
 // noopExecTracker is a step.Handler that succeeds at everything and records
 // whether Exec was called.
 type noopExecTracker struct {
