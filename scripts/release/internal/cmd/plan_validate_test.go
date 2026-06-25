@@ -344,6 +344,109 @@ func TestNewRootCommand_Exec_UnknownStep(t *testing.T) {
 	}
 }
 
+func TestExecRelease_SafetyGate_PlanPayloadTampered(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+
+	version, stepName := "v0.0.1", "tag"
+	tracker := &noopExecTracker{}
+	registry := setupExecFixture(t, version, stepName, tracker)
+
+	// Change the payload in plan.json without updating payloadHash.
+	planPath := filepath.Join(".git-kura", "release", version, stepName, "plan.json")
+	b, _ := os.ReadFile(planPath)
+	var envelope schema.ReleasePlanEnvelope
+	_ = json.Unmarshal(b, &envelope)
+	envelope.Payload.StepData = json.RawMessage(`{"tampered":true}`)
+	// Deliberately do NOT recompute payloadHash — this simulates payload tampering.
+	out, _ := json.MarshalIndent(envelope, "", "  ")
+	_ = os.WriteFile(planPath, out, 0o644)
+
+	if err := cmd.ExecRelease(registry, version, stepName); err == nil {
+		t.Fatal("expected error when plan payload was tampered without updating payloadHash")
+	}
+	if tracker.execCalled {
+		t.Fatal("Exec must not be called when plan payload has been tampered")
+	}
+}
+
+func TestExecRelease_SafetyGate_ResultUnsupportedSchemaVersion(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+
+	version, stepName := "v0.0.1", "tag"
+	tracker := &noopExecTracker{}
+	registry := setupExecFixture(t, version, stepName, tracker)
+
+	resultPath := filepath.Join(".git-kura", "release", version, stepName, "validate-result.json")
+	b, _ := os.ReadFile(resultPath)
+	var result schema.ValidateResult
+	_ = json.Unmarshal(b, &result)
+	result.SchemaVersion = "999"
+	out, _ := json.MarshalIndent(result, "", "  ")
+	_ = os.WriteFile(resultPath, out, 0o644)
+
+	if err := cmd.ExecRelease(registry, version, stepName); err == nil {
+		t.Fatal("expected error for unsupported validate result schemaVersion")
+	}
+	if tracker.execCalled {
+		t.Fatal("Exec must not be called when result schemaVersion is unsupported")
+	}
+}
+
+func TestExecRelease_SafetyGate_ResultWrongKind(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+
+	version, stepName := "v0.0.1", "tag"
+	tracker := &noopExecTracker{}
+	registry := setupExecFixture(t, version, stepName, tracker)
+
+	resultPath := filepath.Join(".git-kura", "release", version, stepName, "validate-result.json")
+	b, _ := os.ReadFile(resultPath)
+	var result schema.ValidateResult
+	_ = json.Unmarshal(b, &result)
+	result.Kind = "UnexpectedKind"
+	out, _ := json.MarshalIndent(result, "", "  ")
+	_ = os.WriteFile(resultPath, out, 0o644)
+
+	if err := cmd.ExecRelease(registry, version, stepName); err == nil {
+		t.Fatal("expected error for wrong validate result kind")
+	}
+	if tracker.execCalled {
+		t.Fatal("Exec must not be called when result kind is wrong")
+	}
+}
+
+func TestNewRootCommand_Validate_TamperedPayload(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+
+	r := placeholder.NewDefaultRegistry()
+	root := cmd.NewRootCommand(r)
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+
+	root.SetArgs([]string{"plan", "--version", "v0.0.1", "--step", "winget"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("plan command failed: %v", err)
+	}
+
+	// Tamper the payload without updating payloadHash.
+	planPath := filepath.Join(".git-kura", "release", "v0.0.1", "winget", "plan.json")
+	b, _ := os.ReadFile(planPath)
+	var envelope schema.ReleasePlanEnvelope
+	_ = json.Unmarshal(b, &envelope)
+	envelope.Payload.StepData = json.RawMessage(`{"injected":"data"}`)
+	out, _ := json.MarshalIndent(envelope, "", "  ")
+	_ = os.WriteFile(planPath, out, 0o644)
+
+	root.SetArgs([]string{"validate", "--version", "v0.0.1", "--step", "winget"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected validate to fail when plan payload has been tampered")
+	}
+}
+
 // noopExecTracker is a step.Handler that succeeds at everything and records
 // whether Exec was called.
 type noopExecTracker struct {

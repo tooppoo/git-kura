@@ -40,6 +40,15 @@ func runValidate(registry *step.Registry, version, stepName string) error {
 		return fmt.Errorf("load plan: %w", err)
 	}
 
+	// Re-compute payloadHash to detect payload tampering before validation.
+	computed, err := computePayloadHash(plan.Payload)
+	if err != nil {
+		return fmt.Errorf("compute payload hash: %w", err)
+	}
+	if computed != plan.PayloadHash {
+		return fmt.Errorf("plan payloadHash mismatch: payload may have been modified (stored: %s, computed: %s)", plan.PayloadHash, computed)
+	}
+
 	errs, warnings, internalErr := h.Validate(&plan)
 
 	status := schema.ValidateStatusSuccess

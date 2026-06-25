@@ -76,6 +76,22 @@ func safetyGate(plan *schema.ReleasePlanEnvelope, result *schema.ValidateResult,
 	if !supportedPlanSchemaVersions[plan.SchemaVersion] {
 		return fmt.Errorf("unsupported plan schemaVersion %q", plan.SchemaVersion)
 	}
+
+	// Re-compute payloadHash to detect payload tampering since plan was generated.
+	computed, err := computePayloadHash(plan.Payload)
+	if err != nil {
+		return fmt.Errorf("compute payload hash: %w", err)
+	}
+	if computed != plan.PayloadHash {
+		return fmt.Errorf("plan payload was modified after the plan was generated (re-run plan and validate)")
+	}
+
+	if result.SchemaVersion != schema.ValidateSchemaVersion {
+		return fmt.Errorf("unsupported validate result schemaVersion %q", result.SchemaVersion)
+	}
+	if result.Kind != schema.ValidateKind {
+		return fmt.Errorf("unexpected validate result kind %q, want %q", result.Kind, schema.ValidateKind)
+	}
 	if result.Status != schema.ValidateStatusSuccess {
 		return fmt.Errorf("validate result status is %q, not %q: re-run validate after fixing errors", result.Status, schema.ValidateStatusSuccess)
 	}
