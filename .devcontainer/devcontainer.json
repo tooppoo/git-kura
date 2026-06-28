@@ -17,7 +17,8 @@
     "vscode": {
       "extensions": [
         "golang.Go",
-        "EditorConfig.EditorConfig"
+        "EditorConfig.EditorConfig",
+        "skellock.just"
       ],
       "settings": {
         "editor.formatOnSave": true,

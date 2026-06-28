@@ -8,8 +8,8 @@
 # scope.
 #
 # Prerequisites: `git kura` must resolve on PATH. In CI this is arranged by
-# running `make build` and prepending `./bin` to PATH. For local runs use
-# `make walkthrough`, which does the same and then invokes this script.
+# running `just build` and prepending `./bin` to PATH. For local runs use
+# `just walkthrough`, which does the same and then invokes this script.
 #
 # Read top-down: `main` describes the walkthrough; the helpers it relies on are
 # defined below it and `main` is invoked at the end of the file.

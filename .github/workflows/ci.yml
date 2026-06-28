@@ -15,14 +15,15 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+      - uses: extractions/setup-just@v4
 
       - uses: actions/setup-go@v6
         with:
           go-version-file: 'go.mod'
 
-      - run: make tidy
+      - run: just tidy
 
-      - run: make ci
+      - run: just ci
 
       - uses: codecov/codecov-action@v5
         with:
@@ -46,4 +47,6 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - run: make walkthrough
+      - uses: extractions/setup-just@v4
+
+      - run: just walkthrough

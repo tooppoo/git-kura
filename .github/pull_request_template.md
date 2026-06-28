@@ -96,8 +96,7 @@ CLI, config, state file, schema, logs, worktree/branch, GitHub Issue/PR 操作�
 
 ## 確認したこと
 
-- [ ] `go test ./...`
-- [ ] `make fmt-check`
+- [ ] `just check`
 - [ ] その他:
   - [ ] `...`
   - [ ] `...`
