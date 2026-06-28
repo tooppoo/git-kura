@@ -137,93 +137,148 @@ func (h *Handler) ValidateWithData(plan *schema.ReleasePlanEnvelope) ([]string, 
 	}
 
 	var errs []string
-	var results []assetResult
+
+	// pendingArchive collects a platform or Windows archive result before
+	// checksums.txt is processed so that checksumEntryCheck can be added in a
+	// second pass and appended to the final result slice in canonical order.
+	type pendingArchive struct {
+		r        assetResult
+		filename string
+	}
 
 	// 1. Platform archives: existence + metadata confirmation from asset list.
+	//    Defer appending to results until checksums.txt is processed.
 	windowsURLs := map[string]string{}
+	paItems := make([]pendingArchive, 0, len(p.PlatformArchives))
 	for _, pa := range p.PlatformArchives {
 		r := checkAssetExists(assetMap, pa.Filename, "platform-archive")
 		r.OS = pa.OS
 		r.Arch = pa.Arch
 		if r.Status == statusFail {
 			errs = append(errs, fmt.Sprintf("platform archive %q not found in GitHub Release assets", pa.Filename))
-		}
-		if pa.OS == "windows" {
+		} else if pa.OS == "windows" {
+			// Only register when found so package-manager lookup correctly gets
+			// ok==false (not an empty-URL success) for a missing Windows archive.
 			windowsURLs[pa.Arch] = r.BrowserDownloadURL
 		}
-		results = append(results, r)
+		paItems = append(paItems, pendingArchive{r: r, filename: pa.Filename})
 	}
 
 	// 2. Package-manager Windows archives: same files as Windows platform
 	//    archives but recorded separately per arch for scoop/winget steps.
+	waItems := make([]pendingArchive, 0, len(p.PackageManagerWindowsArchives))
 	for _, wa := range p.PackageManagerWindowsArchives {
 		r := assetResult{
 			AssetKind: "package-manager-windows-archive",
 			OS:        "windows",
 			Arch:      wa.Arch,
 			Filename:  wa.Filename,
-			Status:    statusOK,
 		}
 		if url, ok := windowsURLs[wa.Arch]; ok {
+			r.Status = statusOK
 			r.BrowserDownloadURL = url
 		} else {
 			r.Status = statusFail
 			r.Error = "asset not found in GitHub Release"
 			errs = append(errs, fmt.Sprintf("package-manager Windows %s archive %q not found in GitHub Release assets", wa.Arch, wa.Filename))
 		}
-		results = append(results, r)
+		waItems = append(waItems, pendingArchive{r: r, filename: wa.Filename})
 	}
 
-	// 3. checksums.txt: existence + download + parse + entry verification.
-	checksumContent := ""
+	// 3. checksums.txt: existence + download + parse.
+	//    Per-archive checksumEntryCheck is written into paItems/waItems here so
+	//    that each assetResult carries existence, metadata, and checksum results.
+	var checksumResult assetResult
 	if a, ok := assetMap[p.ChecksumFile]; ok {
 		content, dlErr := downloadText(a.BrowserDownloadURL)
 		if dlErr != nil {
 			errs = append(errs, fmt.Sprintf("download %q: %v", p.ChecksumFile, dlErr))
-			results = append(results, assetResult{
+			checksumResult = assetResult{
 				AssetKind: "checksum-file",
 				Filename:  p.ChecksumFile,
 				Status:    statusFail,
 				Error:     dlErr.Error(),
-			})
+			}
+			for i := range paItems {
+				if paItems[i].r.Status == statusOK {
+					paItems[i].r.Checks = map[string]string{"checksumEntryCheck": "skipped"}
+				}
+			}
+			for i := range waItems {
+				if waItems[i].r.Status == statusOK {
+					waItems[i].r.Checks = map[string]string{"checksumEntryCheck": "skipped"}
+				}
+			}
 		} else {
-			checksumContent = content
-			results = append(results, assetResult{
+			checksumResult = assetResult{
 				AssetKind:          "checksum-file",
 				Filename:           p.ChecksumFile,
 				Status:             statusOK,
 				BrowserDownloadURL: a.BrowserDownloadURL,
-			})
+			}
+			// Track reported filenames to avoid duplicate top-level errors when
+			// a Windows archive appears in both paItems and waItems.
+			reported := map[string]bool{}
+			for i, item := range paItems {
+				if item.r.Status != statusOK {
+					continue
+				}
+				if hasChecksumEntry(content, item.filename) {
+					paItems[i].r.Checks = map[string]string{"checksumEntryCheck": statusOK}
+				} else {
+					paItems[i].r.Checks = map[string]string{"checksumEntryCheck": statusFail}
+					paItems[i].r.Status = statusFail
+					if !reported[item.filename] {
+						reported[item.filename] = true
+						errs = append(errs, fmt.Sprintf("checksums.txt: no sha256 entry for %q", item.filename))
+					}
+				}
+			}
+			for i, item := range waItems {
+				if item.r.Status != statusOK {
+					continue
+				}
+				if hasChecksumEntry(content, item.filename) {
+					waItems[i].r.Checks = map[string]string{"checksumEntryCheck": statusOK}
+				} else {
+					waItems[i].r.Checks = map[string]string{"checksumEntryCheck": statusFail}
+					waItems[i].r.Status = statusFail
+					if !reported[item.filename] {
+						reported[item.filename] = true
+						errs = append(errs, fmt.Sprintf("checksums.txt: no sha256 entry for package-manager Windows %s archive %q", item.r.Arch, item.filename))
+					}
+				}
+			}
 		}
 	} else {
 		errs = append(errs, fmt.Sprintf("%q not found in GitHub Release assets", p.ChecksumFile))
-		results = append(results, assetResult{
+		checksumResult = assetResult{
 			AssetKind: "checksum-file",
 			Filename:  p.ChecksumFile,
 			Status:    statusFail,
 			Error:     "not found in GitHub Release assets",
-		})
+		}
+		for i := range paItems {
+			if paItems[i].r.Status == statusOK {
+				paItems[i].r.Checks = map[string]string{"checksumEntryCheck": "skipped"}
+			}
+		}
+		for i := range waItems {
+			if waItems[i].r.Status == statusOK {
+				waItems[i].r.Checks = map[string]string{"checksumEntryCheck": "skipped"}
+			}
+		}
 	}
 
-	if checksumContent != "" {
-		checked := map[string]bool{}
-		for _, pa := range p.PlatformArchives {
-			if !checked[pa.Filename] {
-				checked[pa.Filename] = true
-				if !hasChecksumEntry(checksumContent, pa.Filename) {
-					errs = append(errs, fmt.Sprintf("checksums.txt: no sha256 entry for %q", pa.Filename))
-				}
-			}
-		}
-		for _, wa := range p.PackageManagerWindowsArchives {
-			if !checked[wa.Filename] {
-				checked[wa.Filename] = true
-				if !hasChecksumEntry(checksumContent, wa.Filename) {
-					errs = append(errs, fmt.Sprintf("checksums.txt: no sha256 entry for package-manager Windows %s archive %q", wa.Arch, wa.Filename))
-				}
-			}
-		}
+	// Assemble results in canonical order now that all per-archive checks are set.
+	var results []assetResult
+	for _, item := range paItems {
+		results = append(results, item.r)
 	}
+	for _, item := range waItems {
+		results = append(results, item.r)
+	}
+	results = append(results, checksumResult)
 
 	// 4. Signature file: existence in asset list.
 	{
@@ -416,7 +471,8 @@ func fetchGitHubRelease(owner, repo, tag string) (*githubRelease, error) {
 }
 
 // checkAssetExists returns an assetResult reflecting whether name is present
-// in the GitHub Release asset list.
+// in the GitHub Release asset list and has valid metadata (state=="uploaded",
+// non-empty browser_download_url).
 func checkAssetExists(assetMap map[string]githubAsset, name, kind string) assetResult {
 	a, ok := assetMap[name]
 	if !ok {
@@ -425,6 +481,21 @@ func checkAssetExists(assetMap map[string]githubAsset, name, kind string) assetR
 			Filename:  name,
 			Status:    statusFail,
 			Error:     "not found in GitHub Release assets",
+		}
+	}
+	var metaErrs []string
+	if a.State != "uploaded" {
+		metaErrs = append(metaErrs, fmt.Sprintf("asset state is %q, expected \"uploaded\"", a.State))
+	}
+	if a.BrowserDownloadURL == "" {
+		metaErrs = append(metaErrs, "browser_download_url is empty")
+	}
+	if len(metaErrs) > 0 {
+		return assetResult{
+			AssetKind: kind,
+			Filename:  name,
+			Status:    statusFail,
+			Error:     strings.Join(metaErrs, "; "),
 		}
 	}
 	return assetResult{
