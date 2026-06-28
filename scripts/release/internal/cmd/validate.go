@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -49,7 +50,17 @@ func runValidate(registry *step.Registry, version, stepName string) error {
 		return fmt.Errorf("plan payloadHash mismatch: payload may have been modified (stored: %s, computed: %s)", plan.PayloadHash, computed)
 	}
 
-	errs, warnings, internalErr := h.Validate(&plan)
+	var errs, warnings []string
+	var stepData json.RawMessage
+	var internalErr error
+
+	// Use ValidateWithData if the handler implements DetailedValidator so that
+	// per-asset results are recorded in the result file's stepData field.
+	if dv, ok := h.(step.DetailedValidator); ok {
+		errs, warnings, stepData, internalErr = dv.ValidateWithData(&plan)
+	} else {
+		errs, warnings, internalErr = h.Validate(&plan)
+	}
 
 	status := schema.ValidateStatusSuccess
 	if internalErr != nil {
@@ -69,6 +80,7 @@ func runValidate(registry *step.Registry, version, stepName string) error {
 		Warnings:      nullSafe(warnings),
 		PlanID:        plan.PlanID,
 		PayloadHash:   plan.PayloadHash,
+		StepData:      stepData,
 	}
 
 	outPath := validateResultPath(version, string(s))

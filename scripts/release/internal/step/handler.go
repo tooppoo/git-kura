@@ -26,3 +26,12 @@ type Handler interface {
 	// succeeds and all safety-gate checks pass.
 	Exec(plan *schema.ReleasePlanEnvelope) error
 }
+
+// DetailedValidator is an optional extension of Handler for steps that
+// produce per-asset machine-readable data in the validate result StepData.
+// The validate command checks for this interface via type assertion and, when
+// present, uses ValidateWithData instead of Validate so that stepData is
+// recorded in the result file.
+type DetailedValidator interface {
+	ValidateWithData(plan *schema.ReleasePlanEnvelope) (errs []string, warnings []string, stepData json.RawMessage, err error)
+}
