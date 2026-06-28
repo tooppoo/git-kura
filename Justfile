@@ -56,5 +56,5 @@ ci: fmt-check vet coverage vuln license-check
 
 check: lint ci
 
-release:
-    go run scripts/release/main.go
+release +subs:
+    go run scripts/release/main.go {{subs}}
