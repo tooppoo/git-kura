@@ -327,14 +327,15 @@ func TestValidateToolsSidecar(t *testing.T) {
 	}
 
 	const (
-		wantVersion = "0.0.7"
-		wantArchive = "git-kura-tools_0.0.7.tar.gz"
-		sidecarName = "git-kura-tools_0.0.7.json"
+		wantVersion   = "0.0.7"
+		wantArchive   = "git-kura-tools_0.0.7.tar.gz"
+		sidecarName   = "git-kura-tools_0.0.7.json"
+		validChecksum = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" // SHA256(""), 64 hex chars
 	)
 
 	t.Run("all fields valid", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write(manifest(wantVersion, wantArchive, "abc123", "sha256"))
+			_, _ = w.Write(manifest(wantVersion, wantArchive, validChecksum, "sha256"))
 		}))
 		defer srv.Close()
 
@@ -354,7 +355,7 @@ func TestValidateToolsSidecar(t *testing.T) {
 
 	t.Run("version mismatch", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write(manifest("0.0.6", wantArchive, "abc123", "sha256"))
+			_, _ = w.Write(manifest("0.0.6", wantArchive, validChecksum, "sha256"))
 		}))
 		defer srv.Close()
 
@@ -372,7 +373,7 @@ func TestValidateToolsSidecar(t *testing.T) {
 
 	t.Run("archiveName mismatch", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write(manifest(wantVersion, "wrong-archive.tar.gz", "abc123", "sha256"))
+			_, _ = w.Write(manifest(wantVersion, "wrong-archive.tar.gz", validChecksum, "sha256"))
 		}))
 		defer srv.Close()
 
@@ -406,9 +407,27 @@ func TestValidateToolsSidecar(t *testing.T) {
 		}
 	})
 
+	t.Run("archiveChecksum not valid sha256 hex", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write(manifest(wantVersion, wantArchive, "abc123", "sha256"))
+		}))
+		defer srv.Close()
+
+		r, errs := validateToolsSidecar(srv.URL, sidecarName, wantArchive, wantVersion)
+		if r.Status != statusFail {
+			t.Errorf("want failure for non-hex checksum, got %s", r.Status)
+		}
+		if r.Checks["archiveChecksumCheck"] != statusFail {
+			t.Errorf("archiveChecksumCheck = %q, want failure", r.Checks["archiveChecksumCheck"])
+		}
+		if len(errs) == 0 {
+			t.Error("want at least one error, got none")
+		}
+	})
+
 	t.Run("unsupported checksumAlgorithm", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write(manifest(wantVersion, wantArchive, "abc123", "md5"))
+			_, _ = w.Write(manifest(wantVersion, wantArchive, validChecksum, "md5"))
 		}))
 		defer srv.Close()
 

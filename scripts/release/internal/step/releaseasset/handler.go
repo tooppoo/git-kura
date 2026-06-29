@@ -606,9 +606,9 @@ func validateToolsSidecar(url, filename, expectedArchive, expectedVersion string
 		checks["archiveNameCheck"] = statusFail
 		errs = append(errs, fmt.Sprintf("tools sidecar manifest archiveName %q does not match expected %q", m.ArchiveName, expectedArchive))
 	}
-	if m.ArchiveChecksum == "" {
+	if !isSHA256Hex(m.ArchiveChecksum) {
 		checks["archiveChecksumCheck"] = statusFail
-		errs = append(errs, "tools sidecar manifest archiveChecksum is empty")
+		errs = append(errs, fmt.Sprintf("tools sidecar manifest archiveChecksum %q is not a valid sha256 hex string", m.ArchiveChecksum))
 	}
 	if m.ChecksumAlgorithm != "sha256" {
 		checks["checksumAlgorithmCheck"] = statusFail
