@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -74,6 +75,10 @@ func computePayloadHash(v any) (string, error) {
 
 func nowISO8601() string {
 	return time.Now().UTC().Format(time.RFC3339)
+}
+
+func stepFlagUsage() string {
+	return "Release step name (one of: " + strings.Join(step.KnownNames(), ", ") + ")"
 }
 
 // NewRootCommand returns the cobra root command wired with plan/validate/exec.

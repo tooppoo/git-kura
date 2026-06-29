@@ -34,7 +34,7 @@ func newExecCommand(registry *step.Registry) *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&version, "version", "", "Target version (vMAJOR.MINOR.PATCH)")
-	c.Flags().StringVar(&stepName, "step", "", "Release step name")
+	c.Flags().StringVar(&stepName, "step", "", stepFlagUsage())
 	c.Flags().StringVar(&bucket, "bucket", "", "Scoop bucket repository root path (used by --step scoop)")
 	_ = c.MarkFlagRequired("version")
 	_ = c.MarkFlagRequired("step")
