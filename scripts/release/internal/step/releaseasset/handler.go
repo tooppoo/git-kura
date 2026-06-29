@@ -530,16 +530,32 @@ func downloadText(url string) (string, error) {
 	return string(b), nil
 }
 
-// hasChecksumEntry reports whether checksums.txt content includes a sha256
-// entry for filename. GoReleaser writes lines as: <sha256hex>  <filename>
+// hasChecksumEntry reports whether checksums.txt content includes a valid
+// sha256 entry for filename. GoReleaser writes lines as: <sha256hex>  <filename>
+// A line is accepted only when fields[0] is a 64-character lowercase hex
+// string (the sha256 digest) and fields[1] matches filename exactly.
 func hasChecksumEntry(content, filename string) bool {
 	for _, line := range strings.Split(content, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) == 2 && fields[1] == filename {
+		if len(fields) == 2 && fields[1] == filename && isSHA256Hex(fields[0]) {
 			return true
 		}
 	}
 	return false
+}
+
+// isSHA256Hex reports whether s is a valid 64-character lowercase hexadecimal
+// string as produced by GoReleaser's sha256 checksum generator.
+func isSHA256Hex(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // toolsSidecarManifest is the JSON structure of the tools sidecar manifest.
