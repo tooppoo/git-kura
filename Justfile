@@ -27,10 +27,13 @@ vet:
 test:
     go test ./...
 
-# カバレッジ付きでテストを実行し、全体カバレッジが閾値（90%）を下回れば失敗させる
+# 全パッケージをテストしつつ、本体 CLI / internal packages のカバレッジが閾値（90%）を下回れば失敗させる
 coverage:
     #!/bin/sh
-    go test -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
+    # scripts/release is maintainer-facing release machinery, not runtime behavior of the distributed git-kura CLI.
+    # Keep testing it via ./..., but exclude it from the coverage gate denominator; see docs/adr/20260629T085414Z_exclude-release-scripts-from-coverage-gate.md.
+    coverpkg=$(go list ./... | grep -v '/scripts/release' | paste -sd, -)
+    go test -covermode=atomic -coverpkg="$coverpkg" -coverprofile=coverage.out ./...
     go tool cover -func="{{justfile_directory()}}/coverage.out"
     go tool cover -func="{{justfile_directory()}}/coverage.out" | awk -v threshold="{{coverage_threshold}}" '/^total:/ { coverage=$3; sub(/%/, "", coverage); if (coverage + 0 < threshold + 0) { printf("coverage %.1f%% is below %.1f%%\n", coverage, threshold); exit 1 } printf("coverage %.1f%% meets %.1f%% threshold\n", coverage, threshold) }'
 
