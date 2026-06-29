@@ -10,23 +10,24 @@ import (
 )
 
 func newValidateCommand(registry *step.Registry) *cobra.Command {
-	var version, stepName string
+	var version, stepName, bucket string
 
 	c := &cobra.Command{
 		Use:   "validate",
 		Short: "Validate the release plan and write a machine-readable result file",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runValidate(registry, version, stepName)
+			return runValidate(registry, version, stepName, step.Options{Bucket: bucket})
 		},
 	}
 	c.Flags().StringVar(&version, "version", "", "Target version (vMAJOR.MINOR.PATCH)")
 	c.Flags().StringVar(&stepName, "step", "", "Release step name")
+	c.Flags().StringVar(&bucket, "bucket", "", "Scoop bucket repository root path (used by --step scoop)")
 	_ = c.MarkFlagRequired("version")
 	_ = c.MarkFlagRequired("step")
 	return c
 }
 
-func runValidate(registry *step.Registry, version, stepName string) error {
+func runValidate(registry *step.Registry, version, stepName string, options step.Options) error {
 	if err := validateVersion(version); err != nil {
 		return err
 	}
@@ -34,6 +35,7 @@ func runValidate(registry *step.Registry, version, stepName string) error {
 	if err != nil {
 		return err
 	}
+	configureHandler(h, options)
 
 	planPath := planFilePath(version, string(s))
 	var plan schema.ReleasePlanEnvelope

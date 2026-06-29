@@ -11,6 +11,7 @@ import (
 	"github.com/tooppoo/git-kura/scripts/release/internal/schema"
 	"github.com/tooppoo/git-kura/scripts/release/internal/step"
 	"github.com/tooppoo/git-kura/scripts/release/internal/step/placeholder"
+	"github.com/tooppoo/git-kura/scripts/release/internal/step/scoop"
 )
 
 // chdir sets the working directory to dir and restores the original on cleanup.
@@ -87,6 +88,105 @@ func TestNewRootCommand_Plan_UnknownStep(t *testing.T) {
 	root.SetArgs([]string{"plan", "--version", "v0.0.1", "--step", "unknown-step"})
 	if err := root.Execute(); err == nil {
 		t.Fatal("expected error for unknown step, got nil")
+	}
+}
+
+func TestNewRootCommand_Plan_ScoopBucketOption(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+
+	bucket := filepath.Join(dir, "bucket-repo")
+	if err := os.MkdirAll(bucket, 0o755); err != nil {
+		t.Fatalf("mkdir bucket: %v", err)
+	}
+
+	r := placeholder.NewDefaultRegistry()
+	r.Register(step.StepScoop, scoop.New())
+	root := cmd.NewRootCommand(r)
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	root.SetArgs([]string{"plan", "--version", "v0.0.7", "--step", "scoop", "--bucket", bucket})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("plan command failed: %v", err)
+	}
+
+	planPath := filepath.Join(".git-kura", "release", "v0.0.7", "scoop", "plan.json")
+	b, err := os.ReadFile(planPath)
+	if err != nil {
+		t.Fatalf("plan file not found: %v", err)
+	}
+	var envelope schema.ReleasePlanEnvelope
+	if err := json.Unmarshal(b, &envelope); err != nil {
+		t.Fatalf("parse plan: %v", err)
+	}
+	var stepData struct {
+		BucketPath   string `json:"bucketPath"`
+		ManifestPath string `json:"manifestPath"`
+	}
+	if err := json.Unmarshal(envelope.Payload.StepData, &stepData); err != nil {
+		t.Fatalf("parse stepData: %v", err)
+	}
+	if stepData.BucketPath != bucket {
+		t.Errorf("bucketPath = %q, want %q", stepData.BucketPath, bucket)
+	}
+	if stepData.ManifestPath != filepath.Join(bucket, "bucket", "git-kura.json") {
+		t.Errorf("manifestPath = %q", stepData.ManifestPath)
+	}
+}
+
+func TestNewRootCommand_Plan_ScoopRequiresBucket(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	r := placeholder.NewDefaultRegistry()
+	r.Register(step.StepScoop, scoop.New())
+	root := cmd.NewRootCommand(r)
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	root.SetArgs([]string{"plan", "--version", "v0.0.7", "--step", "scoop"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected --bucket requirement error")
+	}
+}
+
+func TestNewRootCommand_BucketOptionPassedToOptionAwareHandler(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+
+	bucket := filepath.Join(dir, "bucket-repo")
+	h := &optionAwareTracker{}
+	r := placeholder.NewDefaultRegistry()
+	r.Register(step.StepTag, h)
+	root := cmd.NewRootCommand(r)
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+
+	root.SetArgs([]string{"plan", "--version", "v0.0.7", "--step", "tag", "--bucket", bucket})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("plan command failed: %v", err)
+	}
+	root.SetArgs([]string{"validate", "--version", "v0.0.7", "--step", "tag", "--bucket", bucket})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("validate command failed: %v", err)
+	}
+	root.SetArgs([]string{"exec", "--version", "v0.0.7", "--step", "tag", "--bucket", bucket})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("exec command failed: %v", err)
+	}
+
+	if h.buildBucket != bucket {
+		t.Errorf("BuildPayload saw bucket %q, want %q", h.buildBucket, bucket)
+	}
+	if h.validateBucket != bucket {
+		t.Errorf("ValidateWithData saw bucket %q, want %q", h.validateBucket, bucket)
+	}
+	if h.preflightBucket != bucket {
+		t.Errorf("PreflightWithResult saw bucket %q, want %q", h.preflightBucket, bucket)
+	}
+	if h.execBucket != bucket {
+		t.Errorf("Exec saw bucket %q, want %q", h.execBucket, bucket)
+	}
+	if !h.preflightWithResultCalled {
+		t.Error("exec should use PreflightWithResult when handler implements ResultPreflighter")
 	}
 }
 
@@ -322,6 +422,26 @@ func TestExecRelease_NoPlanFile(t *testing.T) {
 	}
 }
 
+func TestExecRelease_RequiresValidateResult(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+
+	version, stepName := "v0.0.1", "tag"
+	tracker := &noopExecTracker{}
+	registry := setupExecFixture(t, version, stepName, tracker)
+	resultPath := filepath.Join(".git-kura", "release", version, stepName, "validate-result.json")
+	if err := os.Remove(resultPath); err != nil {
+		t.Fatalf("remove validate result: %v", err)
+	}
+
+	if err := cmd.ExecRelease(registry, version, stepName); err == nil {
+		t.Fatal("expected error when validate result file does not exist")
+	}
+	if tracker.execCalled {
+		t.Fatal("Exec must not be called without a validate result")
+	}
+}
+
 func TestNewRootCommand_Exec_InvalidVersion(t *testing.T) {
 	chdir(t, t.TempDir())
 	root := cmd.NewRootCommand(placeholder.NewDefaultRegistry())
@@ -539,6 +659,50 @@ func (h *noopExecTracker) Validate(_ *schema.ReleasePlanEnvelope) ([]string, []s
 func (h *noopExecTracker) Preflight(_ *schema.ReleasePlanEnvelope) error { return nil }
 func (h *noopExecTracker) Exec(_ *schema.ReleasePlanEnvelope) error {
 	h.execCalled = true
+	return nil
+}
+
+type optionAwareTracker struct {
+	options                   step.Options
+	buildBucket               string
+	validateBucket            string
+	preflightBucket           string
+	execBucket                string
+	preflightWithResultCalled bool
+}
+
+func (h *optionAwareTracker) SetOptions(options step.Options) {
+	h.options = options
+}
+
+func (h *optionAwareTracker) BuildPayload(_ string) (json.RawMessage, error) {
+	h.buildBucket = h.options.Bucket
+	return json.Marshal(map[string]string{})
+}
+
+func (h *optionAwareTracker) Validate(_ *schema.ReleasePlanEnvelope) ([]string, []string, error) {
+	h.validateBucket = h.options.Bucket
+	return nil, nil, nil
+}
+
+func (h *optionAwareTracker) ValidateWithData(_ *schema.ReleasePlanEnvelope) ([]string, []string, json.RawMessage, error) {
+	h.validateBucket = h.options.Bucket
+	raw, err := json.Marshal(map[string]string{"bucket": h.options.Bucket})
+	return nil, nil, raw, err
+}
+
+func (h *optionAwareTracker) Preflight(_ *schema.ReleasePlanEnvelope) error {
+	return nil
+}
+
+func (h *optionAwareTracker) PreflightWithResult(_ *schema.ReleasePlanEnvelope, _ *schema.ValidateResult) error {
+	h.preflightBucket = h.options.Bucket
+	h.preflightWithResultCalled = true
+	return nil
+}
+
+func (h *optionAwareTracker) Exec(_ *schema.ReleasePlanEnvelope) error {
+	h.execBucket = h.options.Bucket
 	return nil
 }
 
