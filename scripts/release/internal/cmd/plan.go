@@ -12,23 +12,24 @@ import (
 )
 
 func newPlanCommand(registry *step.Registry) *cobra.Command {
-	var version, stepName string
+	var version, stepName, bucket string
 
 	c := &cobra.Command{
 		Use:   "plan",
 		Short: "Generate a release plan file for a given step",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runPlan(registry, version, stepName)
+			return runPlan(registry, version, stepName, step.Options{Bucket: bucket})
 		},
 	}
 	c.Flags().StringVar(&version, "version", "", "Target version (vMAJOR.MINOR.PATCH)")
 	c.Flags().StringVar(&stepName, "step", "", "Release step name")
+	c.Flags().StringVar(&bucket, "bucket", "", "Scoop bucket repository root path (used by --step scoop)")
 	_ = c.MarkFlagRequired("version")
 	_ = c.MarkFlagRequired("step")
 	return c
 }
 
-func runPlan(registry *step.Registry, version, stepName string) error {
+func runPlan(registry *step.Registry, version, stepName string, options step.Options) error {
 	if err := validateVersion(version); err != nil {
 		return err
 	}
@@ -36,6 +37,7 @@ func runPlan(registry *step.Registry, version, stepName string) error {
 	if err != nil {
 		return err
 	}
+	configureHandler(h, options)
 
 	stepData, err := h.BuildPayload(version)
 	if err != nil {
