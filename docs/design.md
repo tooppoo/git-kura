@@ -1,8 +1,8 @@
 # Design
 
-Kura is a keyed worktree resolver for Git.
+Kura is a conflict-aware keyed worktree coordinator for Git.
 
-Its core responsibility is intentionally narrow: given a stable key such as an issue, ticket, or task number, Kura creates, resolves, and removes a deterministic Git worktree.
+Its core responsibility is intentionally narrow: given a stable key such as an issue, ticket, or task number, Kura creates, resolves, and removes a deterministic Git worktree, and manages cooperative path seal claims that surface conflicting edits across tasks before implementation, commit, or merge.
 
 ## Design principles
 
@@ -34,13 +34,21 @@ For AI prompts, Kura provides [TOON](https://github.com/toon-format/toon):
 git kura get 51 --toon
 ```
 
-### 3. Kura should stay small
+### 3. Early conflict detection
+
+A task claims the repository-relative paths it intends to edit before changing them; conflicting claims from different tasks are detected immediately, not at merge time.
+
+Path seals are cooperative: they protect workflows that follow the git-kura protocol. They do not prevent a process that ignores git-kura from editing claimed paths.
+
+The pre-commit hook (`git kura tools install pre-commit`) provides a final safety net by checking staged files against the seal store at commit time, even if `seal claim` was skipped.
+
+### 4. Kura should stay small
 
 Kura should not become an AI session manager, TUI Git client, pull request orchestrator, or issue tracker client.
 
-Those tools may integrate with Kura, but Kura itself should remain focused on keyed worktree lifecycle management.
+Those tools may integrate with Kura, but Kura itself should remain focused on keyed worktree lifecycle management and path seal coordination.
 
-### 4. Safety over convenience
+### 5. Safety over convenience
 
 Removing a worktree should be conservative.
 
@@ -65,7 +73,8 @@ Kura does not aim to:
 * infer the correct worktree from natural language
 * classify or evaluate task priority
 
-Kura only manages the mapping between a key and a Git worktree.
+Kura manages the mapping between a key and a Git worktree, and the cooperative path seal claims that make cross-task file conflicts detectable before merge.
+It is not a general-purpose conflict resolver: resolving detected conflicts remains the responsibility of the task owner or agent.
 
 See [state-management.md](state-management.md) for how Kura stores local worktrees and metadata.
 
