@@ -83,7 +83,7 @@ The `release-asset` validate step downloads the sidecar manifest and verifies th
 
 - `version` equals the GoReleaser version string (CLI version without `v`).
 - `archiveName` equals the expected tools archive filename.
-- `archiveChecksum` is a non-empty string.
+- `archiveChecksum` is a valid 64-character lowercase sha256 hex string.
 - `checksumAlgorithm` is `sha256`.
 
 See [tools-asset-distribution.md](tools-asset-distribution.md) for the full specification of the tools archive format and how `git kura tools install` uses these fields.
