@@ -1,0 +1,75 @@
+name: Question
+description: Ask a question about git-kura behavior, usage, design, or implementation direction
+title: "[ques]"
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to ask a question about git-kura.
+        This template is for clarification, design discussion, usage questions, or implementation direction.
+        If the expected behavior is already clear and git-kura behaves differently, use the bug report template instead.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: Write the question clearly and directly.
+      placeholder: |
+        Example:
+        Should `git kura review` validate the target worktree before switching context?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: Select the closest category.
+      options:
+        - Usage
+        - Current behavior clarification
+        - Design clarification
+        - Implementation direction
+        - Documentation clarification
+        - Release / distribution
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Explain why this question came up. Include the command, workflow, document, issue, or implementation area involved.
+      placeholder: |
+        Example:
+        This came up while reviewing the behavior of `git kura review` for issue #...
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-understanding
+    attributes:
+      label: Current understanding
+      description: Describe your current interpretation, if any.
+      placeholder: |
+        My current understanding is:
+        - ...
+        - ...
+    validations:
+      required: false
+
+  - type: textarea
+    id: related
+    attributes:
+      label: Related materials
+      description: Add related issues, PRs, ADRs, documents, code paths, or external references.
+      placeholder: |
+        - Issue:
+        - PR:
+        - ADR:
+        - Docs:
+        - Code:
+    validations:
+      required: false
