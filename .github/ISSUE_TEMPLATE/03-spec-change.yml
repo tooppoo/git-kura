@@ -1,6 +1,7 @@
 name: Specification change
 description: Propose a change to an existing specification, design policy, or documented behavior in git-kura
 title: "[spec]"
+labels: ["spec"]
 body:
   - type: markdown
     attributes:
