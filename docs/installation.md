@@ -52,6 +52,18 @@ ura`. Place it somewhere on `PATH`:
 cp ./bin/git-kura ~/.local/bin/git-kura
 ```
 
+## Dev Container
+
+`git-kura` is also provided as feature for [devcontainer](https://code.visualstudio.com/docs/devcontainers/containers).
+
+```json
+"features": {
+    "ghcr.io/tooppoo/catalog-devcontainer-features/git-kura:0": {}
+}
+```
+
+detail is: [tooppoo/catalog-devcontainer-features : src/git-kura](https://github.com/tooppoo/catalog-devcontainer-features/tree/main/src/git-kura)
+
 ## Scoop (Windows)
 
 On Windows, `git-kura` can be installed from the Philomagi Scoop bucket:
