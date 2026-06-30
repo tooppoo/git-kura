@@ -32,3 +32,4 @@ When deciding whether a file belongs in `scripts/` versus `tools/`, ask: is this
 ## Further reading
 
 - Responsibility boundary between `tools/` and `scripts/`: [docs/internal/repository-layout.md](../docs/internal/repository-layout.md)
+- Maintainer release operation workflow: [docs/internal/release-operations.md](../docs/internal/release-operations.md)

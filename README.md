@@ -151,6 +151,7 @@ Tool components are installed from the tools release archive that matches the ru
 * [Output formats](docs/output-format.md)
 * [State management](docs/state-management.md)
 * [Design](docs/design.md)
+* [Maintainer release operations](docs/internal/release-operations.md)
 * [Architecture decision records](docs/adr/)
 
 ## License
