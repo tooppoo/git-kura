@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/tooppoo/git-kura/scripts/release/internal/schema"
 	"github.com/tooppoo/git-kura/scripts/release/internal/step"
@@ -27,9 +28,11 @@ const (
 type Handler struct {
 	bucketPath string
 
-	httpClient *http.Client
-	apiBaseURL string
-	ownerRepo  func() (string, string, error)
+	httpClient      *http.Client
+	apiBaseURL      string
+	ownerRepo       func() (string, string, error)
+	ghRunner        func(dir string, args ...string) (string, error)
+	bucketOwnerRepo func(bucket string) (string, string, error)
 
 	validated           *validateStepData
 	validatedFromResult bool
@@ -38,9 +41,11 @@ type Handler struct {
 // New returns a Handler for the scoop step.
 func New() *Handler {
 	return &Handler{
-		httpClient: http.DefaultClient,
-		apiBaseURL: "https://api.github.com",
-		ownerRepo:  githubOwnerRepo,
+		httpClient:      http.DefaultClient,
+		apiBaseURL:      "https://api.github.com",
+		ownerRepo:       githubOwnerRepo,
+		ghRunner:        defaultGhCapture,
+		bucketOwnerRepo: bucketRemoteOwnerRepo,
 	}
 }
 
@@ -52,12 +57,13 @@ func (h *Handler) SetOptions(options step.Options) {
 }
 
 type planPayload struct {
-	BucketPath      string           `json:"bucketPath"`
-	ManifestPath    string           `json:"manifestPath"`
-	ManifestVersion string           `json:"manifestVersion"`
-	ChecksumFile    string           `json:"checksumFile"`
-	WindowsArchives []windowsArchive `json:"windowsArchives"`
-	CommandPreview  []commandPreview `json:"commandPreview"`
+	BucketPath       string           `json:"bucketPath"`
+	ManifestPath     string           `json:"manifestPath"`
+	ManifestVersion  string           `json:"manifestVersion"`
+	ChecksumFile     string           `json:"checksumFile"`
+	WindowsArchives  []windowsArchive `json:"windowsArchives"`
+	CommandPreview   []commandPreview `json:"commandPreview"`
+	GitHubReleaseURL string           `json:"gitHubReleaseURL"`
 }
 
 type windowsArchive struct {
@@ -99,6 +105,20 @@ type githubAsset struct {
 	Name               string `json:"name"`
 	State              string `json:"state"`
 	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+type ghPRListItem struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	URL    string `json:"url"`
+}
+
+type ghPRViewResponse struct {
+	Files []ghPRFile `json:"files"`
+}
+
+type ghPRFile struct {
+	Path string `json:"path"`
 }
 
 // BuildPayload records the external bucket repository and target manifest path.
@@ -181,7 +201,7 @@ func (h *Handler) PreflightWithResult(plan *schema.ReleasePlanEnvelope, result *
 	return nil
 }
 
-// Exec updates the Scoop manifest and prints the resulting diff and commands.
+// Exec updates the Scoop manifest, creates a PR branch, commits, pushes, and creates a GitHub PR.
 func (h *Handler) Exec(plan *schema.ReleasePlanEnvelope) error {
 	data := h.validated
 	if data == nil || !h.validatedFromResult {
@@ -200,6 +220,15 @@ func (h *Handler) Exec(plan *schema.ReleasePlanEnvelope) error {
 	}
 	if len(updates) != 2 {
 		return fmt.Errorf("validated asset data is incomplete: need 64bit and arm64")
+	}
+
+	// Fail fast if an existing PR would block creation.
+	existingURL, exists, err := h.detectExistingPR(p.BucketPath)
+	if err != nil {
+		return fmt.Errorf("check existing Scoop bucket PRs: %w", err)
+	}
+	if exists {
+		return fmt.Errorf("existing Scoop bucket PR detected: %s\n  Close the existing PR manually before creating a new one", existingURL)
 	}
 
 	content, err := os.ReadFile(p.ManifestPath)
@@ -222,6 +251,43 @@ func (h *Handler) Exec(plan *schema.ReleasePlanEnvelope) error {
 	if err := printGitDiff(p.BucketPath); err != nil {
 		return err
 	}
+
+	// Create PR branch.
+	branchName := branchNameForVersion(plan.Payload.TargetVersion)
+	if _, err := gitCapture(p.BucketPath, "checkout", "-b", branchName); err != nil {
+		return fmt.Errorf("create branch %q: %w", branchName, err)
+	}
+	fmt.Printf("created branch: %s\n", branchName)
+
+	// Stage and commit the manifest.
+	manifestRelPath := filepath.ToSlash(filepath.Join("bucket", "git-kura.json"))
+	if _, err := gitCapture(p.BucketPath, "add", manifestRelPath); err != nil {
+		return fmt.Errorf("git add manifest: %w", err)
+	}
+	commitMsg := fmt.Sprintf("Update git-kura Scoop manifest to %s", plan.Payload.TargetVersion)
+	if _, err := gitCapture(p.BucketPath, "commit", "-m", commitMsg); err != nil {
+		return fmt.Errorf("git commit: %w", err)
+	}
+	fmt.Printf("committed: %s\n", commitMsg)
+
+	// Push the branch. On failure the local commit is preserved.
+	if _, err := gitCapture(p.BucketPath, "push", "origin", branchName); err != nil {
+		fmt.Fprintf(os.Stderr, "push failed; the local commit is intact\n")
+		fmt.Fprintf(os.Stderr, "to push manually:\n  cd %s\n  git push origin %s\n", p.BucketPath, branchName)
+		return fmt.Errorf("push branch %q: %w", branchName, err)
+	}
+	fmt.Printf("pushed: %s → origin\n", branchName)
+
+	// Create the GitHub PR.
+	prURL, err := h.createGitHubPR(p.BucketPath, plan.Payload.TargetVersion, p.GitHubReleaseURL)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("PR created: %s\n", prURL)
+	fmt.Println()
+	fmt.Println("NOTE: PR creation does not mean the Scoop package manager update is complete.")
+	fmt.Println("A maintainer must review the diff, confirm CI passes all required checks, and merge this PR manually.")
+
 	printCommandPreview(data.CommandPreview)
 	return nil
 }
@@ -231,16 +297,22 @@ func (h *Handler) buildPlanPayload(version string) (planPayload, error) {
 	if err != nil {
 		return planPayload{}, err
 	}
-	return expectedPlanPayload(bucket, version), nil
+	// ownerRepo failure leaves gitHubReleaseURL empty; validate catches this.
+	var releaseURL string
+	if owner, repo, err := h.ownerRepo(); err == nil {
+		releaseURL = gitHubReleaseURL(owner, repo, version)
+	}
+	return expectedPlanPayload(bucket, version, releaseURL), nil
 }
 
-func expectedPlanPayload(bucket, version string) planPayload {
+func expectedPlanPayload(bucket, version, releaseURL string) planPayload {
 	manifest := filepath.Join(bucket, "bucket", "git-kura.json")
 	return planPayload{
-		BucketPath:      bucket,
-		ManifestPath:    manifest,
-		ManifestVersion: strings.TrimPrefix(version, "v"),
-		ChecksumFile:    checksumFileName,
+		BucketPath:       bucket,
+		ManifestPath:     manifest,
+		ManifestVersion:  strings.TrimPrefix(version, "v"),
+		ChecksumFile:     checksumFileName,
+		GitHubReleaseURL: releaseURL,
 		WindowsArchives: []windowsArchive{
 			{ScoopArchitecture: "64bit", GoArch: "amd64", Filename: archiveFilename(version, "amd64")},
 			{ScoopArchitecture: "arm64", GoArch: "arm64", Filename: archiveFilename(version, "arm64")},
@@ -263,19 +335,37 @@ func (h *Handler) validate(plan *schema.ReleasePlanEnvelope) ([]string, []string
 	} else if bucket != p.BucketPath {
 		errs = append(errs, fmt.Sprintf("CLI --bucket %q does not match plan bucketPath %q", bucket, p.BucketPath))
 	}
-	errs = append(errs, validatePlanPayload(plan.Payload.TargetVersion, p)...)
+
+	owner, repo, ownerRepoErr := h.ownerRepo()
+	var releaseURL string
+	if ownerRepoErr != nil {
+		errs = append(errs, fmt.Sprintf("resolve GitHub owner/repo: %v", ownerRepoErr))
+	} else {
+		releaseURL = gitHubReleaseURL(owner, repo, plan.Payload.TargetVersion)
+	}
+
+	errs = append(errs, validatePlanPayload(plan.Payload.TargetVersion, p, releaseURL)...)
 
 	if err := validateBucketRepo(p.BucketPath); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if err := validateBucketBaseBranch(p.BucketPath); err != nil {
 		errs = append(errs, err.Error())
 	}
 	if err := validateManifestFile(p.ManifestPath); err != nil {
 		errs = append(errs, err.Error())
 	}
 
-	manifestArchErrs := validateManifestArchitectures(p.ManifestPath)
-	errs = append(errs, manifestArchErrs...)
+	errs = append(errs, validateManifestArchitectures(p.ManifestPath)...)
 
-	expected := expectedPlanPayload(p.BucketPath, plan.Payload.TargetVersion)
+	if _, _, err := h.bucketOwnerRepo(p.BucketPath); err != nil {
+		errs = append(errs, err.Error())
+	}
+
+	errs = append(errs, h.validateGhCLI(p.BucketPath)...)
+	errs = append(errs, validateGitUserConfig(p.BucketPath)...)
+
+	expected := expectedPlanPayload(p.BucketPath, plan.Payload.TargetVersion, releaseURL)
 	assets, assetErrs, err := h.validateReleaseAssets(plan.Payload.TargetVersion, expected)
 	if err != nil {
 		return nil, nil, nil, err
@@ -294,8 +384,8 @@ func (h *Handler) validate(plan *schema.ReleasePlanEnvelope) ([]string, []string
 	return errs, nil, data, nil
 }
 
-func validatePlanPayload(version string, p planPayload) []string {
-	expected := expectedPlanPayload(p.BucketPath, version)
+func validatePlanPayload(version string, p planPayload, releaseURL string) []string {
+	expected := expectedPlanPayload(p.BucketPath, version, releaseURL)
 	var errs []string
 	if p.ManifestPath != expected.ManifestPath {
 		errs = append(errs, fmt.Sprintf("plan payload manifestPath %q must be %q", p.ManifestPath, expected.ManifestPath))
@@ -311,6 +401,9 @@ func validatePlanPayload(version string, p planPayload) []string {
 	}
 	if !reflect.DeepEqual(p.CommandPreview, expected.CommandPreview) {
 		errs = append(errs, "plan payload commandPreview must match the derived Scoop validation command preview")
+	}
+	if releaseURL != "" && p.GitHubReleaseURL != releaseURL {
+		errs = append(errs, fmt.Sprintf("plan payload gitHubReleaseURL %q must be %q", p.GitHubReleaseURL, releaseURL))
 	}
 	return errs
 }
@@ -405,6 +498,127 @@ func (h *Handler) fetchChecksums(assetMap map[string]githubAsset, name string) (
 	return parseChecksums(content), nil
 }
 
+// detectExistingPR returns the URL of an existing open Scoop bucket PR if one is found.
+// Detection: base=main, title prefix "[git-kura]", changed file "bucket/git-kura.json".
+func (h *Handler) detectExistingPR(bucket string) (string, bool, error) {
+	out, err := h.ghRunner(bucket, "pr", "list", "--base", "main", "--state", "open", "--json", "number,title,url")
+	if err != nil {
+		return "", false, fmt.Errorf("list open PRs: %w", err)
+	}
+	var prs []ghPRListItem
+	if err := json.Unmarshal([]byte(out), &prs); err != nil {
+		return "", false, fmt.Errorf("parse PR list response: %w", err)
+	}
+	for _, pr := range prs {
+		if !strings.HasPrefix(pr.Title, "[git-kura]") {
+			continue
+		}
+		filesOut, err := h.ghRunner(bucket, "pr", "view", fmt.Sprintf("%d", pr.Number), "--json", "files")
+		if err != nil {
+			return "", false, fmt.Errorf("get files for PR #%d: %w", pr.Number, err)
+		}
+		var prView ghPRViewResponse
+		if err := json.Unmarshal([]byte(filesOut), &prView); err != nil {
+			return "", false, fmt.Errorf("parse files for PR #%d: %w", pr.Number, err)
+		}
+		for _, f := range prView.Files {
+			if f.Path == "bucket/git-kura.json" {
+				return pr.URL, true, nil
+			}
+		}
+	}
+	return "", false, nil
+}
+
+// createGitHubPR runs gh pr create in the bucket directory and returns the new PR URL.
+func (h *Handler) createGitHubPR(bucket, version, releaseURL string) (string, error) {
+	title := fmt.Sprintf("[git-kura] %s update release", version)
+	body := buildPRBody(version, releaseURL)
+	out, err := h.ghRunner(bucket, "pr", "create", "--base", "main", "--title", title, "--body", body)
+	if err != nil {
+		return "", fmt.Errorf("create GitHub PR: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
+func buildPRBody(version, releaseURL string) string {
+	return fmt.Sprintf(`## %s update
+
+GitHub Release: %s
+
+---
+
+> **Note:** Creation of this PR does not mean the Scoop package manager update is complete.
+> A maintainer must review the diff, confirm CI passes all required checks, and merge this PR manually.
+`, version, releaseURL)
+}
+
+// validateGhCLI checks that the gh CLI is available and authenticated.
+func (h *Handler) validateGhCLI(bucket string) []string {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return []string{"gh CLI not found in PATH; install GitHub CLI (https://cli.github.com)"}
+	}
+	if _, err := h.ghRunner(bucket, "auth", "status"); err != nil {
+		return []string{"gh auth status failed: run 'gh auth login' to authenticate"}
+	}
+	return nil
+}
+
+// validateGitUserConfig checks that git user.name and user.email are configured in the bucket repository.
+func validateGitUserConfig(bucket string) []string {
+	var errs []string
+	if name, err := gitCapture(bucket, "config", "user.name"); err != nil || strings.TrimSpace(name) == "" {
+		errs = append(errs, fmt.Sprintf("git user.name is not configured in bucket repository %q", bucket))
+	}
+	if email, err := gitCapture(bucket, "config", "user.email"); err != nil || strings.TrimSpace(email) == "" {
+		errs = append(errs, fmt.Sprintf("git user.email is not configured in bucket repository %q", bucket))
+	}
+	return errs
+}
+
+// branchNameForVersion returns a branch-safe name for the PR branch.
+func branchNameForVersion(version string) string {
+	ts := time.Now().UTC().Format("20060102T150405")
+	return fmt.Sprintf("git-kura-%s-%s", version, ts)
+}
+
+// gitHubReleaseURL returns the GitHub Release URL for the given owner, repo, and version.
+func gitHubReleaseURL(owner, repo, version string) string {
+	return fmt.Sprintf("https://github.com/%s/%s/releases/tag/%s", owner, repo, version)
+}
+
+// bucketRemoteOwnerRepo derives the GitHub owner/repo from the bucket repository's origin remote URL.
+func bucketRemoteOwnerRepo(bucket string) (string, string, error) {
+	if strings.TrimSpace(bucket) == "" {
+		return "", "", nil
+	}
+	rawURL, err := gitCapture(bucket, "remote", "get-url", "origin")
+	if err != nil {
+		return "", "", fmt.Errorf("bucket repository has no origin remote: %w", err)
+	}
+	owner, repo, err := ownerRepoFromRemoteURL(rawURL)
+	if err != nil {
+		return "", "", fmt.Errorf("bucket repository origin remote is not a GitHub URL: %w", err)
+	}
+	return owner, repo, nil
+}
+
+// defaultGhCapture runs gh in dir and returns stdout, or an error on non-zero exit.
+func defaultGhCapture(dir string, args ...string) (string, error) {
+	c := exec.Command("gh", args...)
+	if dir != "" {
+		c.Dir = dir
+	}
+	out, err := c.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("gh %s: %s", strings.Join(args, " "), strings.TrimSpace(string(ee.Stderr)))
+		}
+		return "", fmt.Errorf("gh %s: %w", strings.Join(args, " "), err)
+	}
+	return string(out), nil
+}
+
 func normalizeBucketPath(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", fmt.Errorf("--bucket is required for --step scoop")
@@ -437,6 +651,21 @@ func validateBucketRepo(bucket string) error {
 	}
 	if strings.TrimSpace(status) != "" {
 		return fmt.Errorf("bucket repository is not clean:\n%s", strings.TrimSpace(status))
+	}
+	return nil
+}
+
+func validateBucketBaseBranch(bucket string) error {
+	branch, err := gitCapture(bucket, "branch", "--show-current")
+	if err != nil {
+		return fmt.Errorf("resolve bucket repository current branch: %w", err)
+	}
+	current := strings.TrimSpace(branch)
+	if current != "main" {
+		if current == "" {
+			current = "(detached HEAD)"
+		}
+		return fmt.Errorf("bucket repository must be on main before creating Scoop PR branch; current branch is %q", current)
 	}
 	return nil
 }
@@ -532,16 +761,22 @@ func ensureOnlyManifestDiff(bucket string) error {
 	}
 	allowed := filepath.ToSlash(filepath.Join("bucket", "git-kura.json"))
 	var unexpected []string
+	hasManifestDiff := false
 	for _, line := range strings.Split(strings.TrimRight(status, "\n"), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		if !allPathsAllowed(porcelainPaths(line), allowed) {
+		if allPathsAllowed(porcelainPaths(line), allowed) {
+			hasManifestDiff = true
+		} else {
 			unexpected = append(unexpected, line)
 		}
 	}
 	if len(unexpected) > 0 {
 		return fmt.Errorf("bucket repository has unexpected diff outside %s:\n%s", allowed, strings.Join(unexpected, "\n"))
+	}
+	if !hasManifestDiff {
+		return fmt.Errorf("bucket repository has no manifest diff for %s after update", allowed)
 	}
 	return nil
 }

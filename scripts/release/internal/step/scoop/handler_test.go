@@ -2,6 +2,7 @@ package scoop
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,9 +20,46 @@ const (
 	testARM64Hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
+// fakeGhRunner returns a gh runner keyed by the first two args (e.g. "auth status").
+// A present key with value "" means success with empty output.
+// A key not present returns an error.
+func fakeGhRunner(t *testing.T, responses map[string]string) func(string, ...string) (string, error) {
+	t.Helper()
+	return func(_ string, args ...string) (string, error) {
+		if len(args) < 2 {
+			t.Fatalf("fakeGhRunner: unexpected short command %v", args)
+		}
+		key := args[0] + " " + args[1]
+		out, ok := responses[key]
+		if !ok {
+			return "", fmt.Errorf("fakeGhRunner: unexpected gh command %q", strings.Join(args, " "))
+		}
+		return out, nil
+	}
+}
+
+// fakeGhRunnerSuccess returns a gh runner that succeeds for all commands used during normal operation.
+func fakeGhRunnerSuccess(t *testing.T) func(string, ...string) (string, error) {
+	t.Helper()
+	return fakeGhRunner(t, map[string]string{
+		"auth status": "",
+		"pr list":     `[]`,
+		"pr view":     `{"files":[]}`,
+		"pr create":   "https://github.com/test-owner/test-bucket/pull/1",
+	})
+}
+
+// fakeBucketOwnerRepo returns a bucketOwnerRepo function that always succeeds with test values.
+func fakeBucketOwnerRepo() func(string) (string, string, error) {
+	return func(_ string) (string, string, error) {
+		return "test-owner", "test-bucket", nil
+	}
+}
+
 func TestBuildPayload_NormalizesBucketAndManifestPath(t *testing.T) {
 	dir := t.TempDir()
 	h := New()
+	h.ownerRepo = func() (string, string, error) { return "tooppoo", "git-kura", nil }
 	h.SetOptions(step.Options{Bucket: filepath.Join(dir, "..", filepath.Base(dir))})
 
 	raw, err := h.BuildPayload("v0.0.7")
@@ -43,6 +81,9 @@ func TestBuildPayload_NormalizesBucketAndManifestPath(t *testing.T) {
 	if p.ManifestVersion != "0.0.7" {
 		t.Errorf("manifestVersion = %q, want 0.0.7", p.ManifestVersion)
 	}
+	if p.GitHubReleaseURL != "https://github.com/tooppoo/git-kura/releases/tag/v0.0.7" {
+		t.Errorf("gitHubReleaseURL = %q", p.GitHubReleaseURL)
+	}
 	if len(p.CommandPreview) == 0 {
 		t.Fatal("commandPreview must not be empty")
 	}
@@ -50,6 +91,7 @@ func TestBuildPayload_NormalizesBucketAndManifestPath(t *testing.T) {
 
 func TestBuildPayload_RequiresBucket(t *testing.T) {
 	h := New()
+	h.ownerRepo = func() (string, string, error) { return "tooppoo", "git-kura", nil }
 	if _, err := h.BuildPayload("v0.0.7"); err == nil {
 		t.Fatal("expected --bucket requirement error")
 	}
@@ -186,6 +228,97 @@ func TestValidateWithData_RejectsPlanArchiveFilenames(t *testing.T) {
 	}
 }
 
+func TestValidateWithData_GhAuthFails(t *testing.T) {
+	bucket := newBucketRepo(t)
+	h, srv := newTestHandler(t)
+	defer srv.Close()
+	h.ghRunner = fakeGhRunner(t, map[string]string{
+		// "auth status" absent → error
+	})
+	h.SetOptions(step.Options{Bucket: bucket})
+	plan := planForHandler(t, h, "v0.0.7")
+
+	errs, _, _, err := h.ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("unexpected internal error: %v", err)
+	}
+	if !contains(errs, "gh auth status failed") {
+		t.Fatalf("expected gh auth status error, got %v", errs)
+	}
+}
+
+func TestValidateWithData_GitUserNameNotSetFails(t *testing.T) {
+	bucket := newBucketRepo(t)
+	// Set to empty string to override global config fallback.
+	git(t, bucket, "config", "user.name", "")
+	h, srv := newTestHandler(t)
+	defer srv.Close()
+	h.SetOptions(step.Options{Bucket: bucket})
+	plan := planForHandler(t, h, "v0.0.7")
+
+	errs, _, _, err := h.ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("unexpected internal error: %v", err)
+	}
+	if !contains(errs, "git user.name is not configured") {
+		t.Fatalf("expected git user.name error, got %v", errs)
+	}
+}
+
+func TestValidateWithData_GitUserEmailNotSetFails(t *testing.T) {
+	bucket := newBucketRepo(t)
+	// Set to empty string to override global config fallback.
+	git(t, bucket, "config", "user.email", "")
+	h, srv := newTestHandler(t)
+	defer srv.Close()
+	h.SetOptions(step.Options{Bucket: bucket})
+	plan := planForHandler(t, h, "v0.0.7")
+
+	errs, _, _, err := h.ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("unexpected internal error: %v", err)
+	}
+	if !contains(errs, "git user.email is not configured") {
+		t.Fatalf("expected git user.email error, got %v", errs)
+	}
+}
+
+func TestValidateWithData_BucketRemoteNotGitHubFails(t *testing.T) {
+	bucket := newBucketRepo(t)
+	h, srv := newTestHandler(t)
+	defer srv.Close()
+	h.bucketOwnerRepo = func(_ string) (string, string, error) {
+		return "", "", fmt.Errorf("bucket repository origin remote is not a GitHub URL: cannot parse")
+	}
+	h.SetOptions(step.Options{Bucket: bucket})
+	plan := planForHandler(t, h, "v0.0.7")
+
+	errs, _, _, err := h.ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("unexpected internal error: %v", err)
+	}
+	if !contains(errs, "bucket repository origin remote is not a GitHub URL") {
+		t.Fatalf("expected bucket remote error, got %v", errs)
+	}
+}
+
+func TestValidateWithData_BucketMustStartOnMain(t *testing.T) {
+	bucket, _ := newBucketRepoWithRemote(t)
+	git(t, bucket, "checkout", "-b", "work")
+	h, srv := newTestHandler(t)
+	defer srv.Close()
+	h.SetOptions(step.Options{Bucket: bucket})
+	plan := planForHandler(t, h, "v0.0.7")
+
+	errs, _, _, err := h.ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("unexpected internal error: %v", err)
+	}
+	if !contains(errs, "must be on main") {
+		t.Fatalf("expected main branch validation error, got %v", errs)
+	}
+}
+
 func TestPreflightWithResult_DetectsBucketMismatch(t *testing.T) {
 	bucket := newBucketRepo(t)
 	other := t.TempDir()
@@ -212,10 +345,37 @@ func TestPreflightWithResult_DetectsBucketMismatch(t *testing.T) {
 	}
 }
 
-func TestPreflightAndExec_UpdateManifestAndLeaveOnlyManifestDiff(t *testing.T) {
-	bucket := newBucketRepo(t)
+func TestPreflightAndExec_CreatesBranchCommitsAndCreatesPR(t *testing.T) {
+	bucket, _ := newBucketRepoWithRemote(t)
 	h, srv := newTestHandler(t)
 	defer srv.Close()
+
+	var capturedPRTitle, capturedPRBody, capturedPRBase string
+	h.ghRunner = func(_ string, args ...string) (string, error) {
+		key := args[0] + " " + args[1]
+		switch key {
+		case "auth status":
+			return "", nil
+		case "pr list":
+			return `[]`, nil
+		case "pr view":
+			return `{"files":[]}`, nil
+		case "pr create":
+			for i, a := range args {
+				switch a {
+				case "--title":
+					capturedPRTitle = args[i+1]
+				case "--body":
+					capturedPRBody = args[i+1]
+				case "--base":
+					capturedPRBase = args[i+1]
+				}
+			}
+			return "https://github.com/test-owner/test-bucket/pull/1", nil
+		}
+		return "", fmt.Errorf("unexpected gh command: %v", args)
+	}
+
 	h.SetOptions(step.Options{Bucket: bucket})
 	plan := planForHandler(t, h, "v0.0.7")
 	_, _, raw, err := h.ValidateWithData(plan)
@@ -230,7 +390,6 @@ func TestPreflightAndExec_UpdateManifestAndLeaveOnlyManifestDiff(t *testing.T) {
 		Status:        schema.ValidateStatusSuccess,
 		StepData:      raw,
 	}
-
 	if err := h.PreflightWithResult(plan, result); err != nil {
 		t.Fatalf("PreflightWithResult: %v", err)
 	}
@@ -238,6 +397,7 @@ func TestPreflightAndExec_UpdateManifestAndLeaveOnlyManifestDiff(t *testing.T) {
 		t.Fatalf("Exec: %v", err)
 	}
 
+	// Verify manifest content.
 	var manifest map[string]any
 	b, err := os.ReadFile(filepath.Join(bucket, "bucket", "git-kura.json"))
 	if err != nil {
@@ -262,15 +422,185 @@ func TestPreflightAndExec_UpdateManifestAndLeaveOnlyManifestDiff(t *testing.T) {
 		t.Errorf("arm64 URL not updated: %v", arm64["url"])
 	}
 
+	// Verify we're on a PR branch (not main).
+	branchName := strings.TrimSpace(gitOutput(t, bucket, "branch", "--show-current"))
+	if !strings.HasPrefix(branchName, "git-kura-v0.0.7-") {
+		t.Errorf("expected PR branch starting with git-kura-v0.0.7-, got %q", branchName)
+	}
+
+	// Verify commit message.
+	commitMsg := strings.TrimSpace(gitOutput(t, bucket, "log", "--format=%s", "-1"))
+	wantMsg := "Update git-kura Scoop manifest to v0.0.7"
+	if commitMsg != wantMsg {
+		t.Errorf("commit message = %q, want %q", commitMsg, wantMsg)
+	}
+
+	// Verify clean working tree after commit.
 	status := gitOutput(t, bucket, "status", "--porcelain")
-	lines := strings.Split(strings.TrimSpace(status), "\n")
-	if len(lines) != 1 || !strings.Contains(lines[0], "bucket/git-kura.json") {
-		t.Fatalf("expected only manifest diff, got %q", status)
+	if strings.TrimSpace(status) != "" {
+		t.Fatalf("expected clean working tree after commit, got %q", status)
+	}
+
+	// Verify branch was pushed to the remote (use ls-remote to avoid bare-repo access restrictions).
+	refs := gitOutput(t, bucket, "ls-remote", "--heads", "origin")
+	if !strings.Contains(refs, branchName) {
+		t.Errorf("expected branch %q to be pushed to remote, remote refs:\n%s", branchName, refs)
+	}
+
+	// Verify PR creation.
+	if capturedPRBase != "main" {
+		t.Errorf("PR base = %q, want main", capturedPRBase)
+	}
+	wantTitle := "[git-kura] v0.0.7 update release"
+	if capturedPRTitle != wantTitle {
+		t.Errorf("PR title = %q, want %q", capturedPRTitle, wantTitle)
+	}
+	if !strings.Contains(capturedPRBody, "https://github.com/tooppoo/git-kura/releases/tag/v0.0.7") {
+		t.Errorf("PR body missing release URL: %q", capturedPRBody)
+	}
+	if !strings.Contains(capturedPRBody, "does not mean the Scoop package manager update is complete") {
+		t.Errorf("PR body missing completion note: %q", capturedPRBody)
+	}
+}
+
+func TestExec_FailsWhenManifestUpdateProducesNoDiffAndKeepsMain(t *testing.T) {
+	bucket, _ := newBucketRepoWithRemote(t)
+	h, srv := newTestHandler(t)
+	defer srv.Close()
+
+	if err := os.WriteFile(filepath.Join(bucket, "bucket", "git-kura.json"), targetManifestContent(srv.URL), 0o644); err != nil {
+		t.Fatalf("write target manifest: %v", err)
+	}
+	git(t, bucket, "add", "bucket/git-kura.json")
+	git(t, bucket, "commit", "-m", "already update manifest")
+
+	h.SetOptions(step.Options{Bucket: bucket})
+	plan := planForHandler(t, h, "v0.0.7")
+	_, _, raw, err := h.ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("ValidateWithData: %v", err)
+	}
+	result := &schema.ValidateResult{
+		SchemaVersion: schema.ValidateSchemaVersion,
+		Kind:          schema.ValidateKind,
+		TargetVersion: "v0.0.7",
+		StepName:      "scoop",
+		Status:        schema.ValidateStatusSuccess,
+		StepData:      raw,
+	}
+	if err := h.PreflightWithResult(plan, result); err != nil {
+		t.Fatalf("PreflightWithResult: %v", err)
+	}
+
+	err = h.Exec(plan)
+	if err == nil {
+		t.Fatal("expected Exec to fail when manifest update produces no diff")
+	}
+	if !strings.Contains(err.Error(), "no manifest diff") {
+		t.Errorf("expected no manifest diff error, got %v", err)
+	}
+	branchName := strings.TrimSpace(gitOutput(t, bucket, "branch", "--show-current"))
+	if branchName != "main" {
+		t.Errorf("expected bucket to remain on main, got %q", branchName)
+	}
+}
+
+func TestExec_FailsWhenExistingPRExists(t *testing.T) {
+	bucket, _ := newBucketRepoWithRemote(t)
+	h, srv := newTestHandler(t)
+	defer srv.Close()
+
+	existingPRURL := "https://github.com/test-owner/test-bucket/pull/42"
+	h.ghRunner = func(_ string, args ...string) (string, error) {
+		key := args[0] + " " + args[1]
+		switch key {
+		case "auth status":
+			return "", nil
+		case "pr list":
+			return fmt.Sprintf(`[{"number":42,"title":"[git-kura] v0.0.6 update release","url":%q}]`, existingPRURL), nil
+		case "pr view":
+			return `{"files":[{"path":"bucket/git-kura.json"}]}`, nil
+		}
+		return "", fmt.Errorf("unexpected gh command: %v", args)
+	}
+
+	h.SetOptions(step.Options{Bucket: bucket})
+	plan := planForHandler(t, h, "v0.0.7")
+	_, _, raw, err := h.ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("ValidateWithData: %v", err)
+	}
+	result := &schema.ValidateResult{
+		SchemaVersion: schema.ValidateSchemaVersion,
+		Kind:          schema.ValidateKind,
+		TargetVersion: "v0.0.7",
+		StepName:      "scoop",
+		Status:        schema.ValidateStatusSuccess,
+		StepData:      raw,
+	}
+	if err := h.PreflightWithResult(plan, result); err != nil {
+		t.Fatalf("PreflightWithResult: %v", err)
+	}
+
+	err = h.Exec(plan)
+	if err == nil {
+		t.Fatal("expected Exec to fail when existing PR exists")
+	}
+	if !strings.Contains(err.Error(), existingPRURL) {
+		t.Errorf("error should mention existing PR URL; got %v", err)
+	}
+}
+
+func TestExec_PushFailureKeepsLocalCommit(t *testing.T) {
+	bucket := newBucketRepo(t) // no push-capable remote
+	h, srv := newTestHandler(t)
+	defer srv.Close()
+	h.ghRunner = func(_ string, args ...string) (string, error) {
+		key := args[0] + " " + args[1]
+		switch key {
+		case "auth status":
+			return "", nil
+		case "pr list":
+			return `[]`, nil
+		}
+		return "", fmt.Errorf("unexpected gh command: %v", args)
+	}
+	h.SetOptions(step.Options{Bucket: bucket})
+	plan := planForHandler(t, h, "v0.0.7")
+	_, _, raw, err := h.ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("ValidateWithData: %v", err)
+	}
+	result := &schema.ValidateResult{
+		SchemaVersion: schema.ValidateSchemaVersion,
+		Kind:          schema.ValidateKind,
+		TargetVersion: "v0.0.7",
+		StepName:      "scoop",
+		Status:        schema.ValidateStatusSuccess,
+		StepData:      raw,
+	}
+	if err := h.PreflightWithResult(plan, result); err != nil {
+		t.Fatalf("PreflightWithResult: %v", err)
+	}
+
+	err = h.Exec(plan)
+	if err == nil {
+		t.Fatal("expected Exec to fail due to push error")
+	}
+	if !strings.Contains(err.Error(), "push branch") {
+		t.Errorf("expected push error, got %v", err)
+	}
+
+	// Local commit must still exist after push failure.
+	commitMsg := strings.TrimSpace(gitOutput(t, bucket, "log", "--format=%s", "-1"))
+	wantMsg := "Update git-kura Scoop manifest to v0.0.7"
+	if commitMsg != wantMsg {
+		t.Errorf("expected local commit to be intact after push failure, got %q", commitMsg)
 	}
 }
 
 func TestExec_RequiresValidateResultPreflight(t *testing.T) {
-	bucket := newBucketRepo(t)
+	bucket, _ := newBucketRepoWithRemote(t)
 	h, srv := newTestHandler(t)
 	defer srv.Close()
 	h.SetOptions(step.Options{Bucket: bucket})
@@ -285,7 +615,7 @@ func TestExec_RequiresValidateResultPreflight(t *testing.T) {
 }
 
 func TestFailedPreflightWithResultClearsPreviousValidation(t *testing.T) {
-	bucket := newBucketRepo(t)
+	bucket, _ := newBucketRepoWithRemote(t)
 	h, srv := newTestHandler(t)
 	defer srv.Close()
 	h.SetOptions(step.Options{Bucket: bucket})
@@ -317,7 +647,7 @@ func TestFailedPreflightWithResultClearsPreviousValidation(t *testing.T) {
 }
 
 func TestExec_FailsWhenUnexpectedDiffExistsAfterUpdate(t *testing.T) {
-	bucket := newBucketRepo(t)
+	bucket, _ := newBucketRepoWithRemote(t)
 	h, srv := newTestHandler(t)
 	defer srv.Close()
 	h.SetOptions(step.Options{Bucket: bucket})
@@ -433,6 +763,68 @@ func TestOwnerRepoFromRemoteURL_DoesNotLeakCredentialRemote(t *testing.T) {
 	}
 }
 
+func TestBranchNameForVersion_Format(t *testing.T) {
+	name := branchNameForVersion("v0.0.7")
+	if !strings.HasPrefix(name, "git-kura-v0.0.7-") {
+		t.Errorf("branch name %q does not start with git-kura-v0.0.7-", name)
+	}
+	suffix := strings.TrimPrefix(name, "git-kura-v0.0.7-")
+	for _, c := range suffix {
+		if c == ':' || c == ' ' || c == '~' || c == '^' {
+			t.Errorf("branch name suffix %q contains unsafe character %q", suffix, c)
+		}
+	}
+}
+
+func TestDetectExistingPR_MatchesAllThreeConditions(t *testing.T) {
+	bucket := newBucketRepo(t)
+	h := New()
+	h.bucketOwnerRepo = fakeBucketOwnerRepo()
+
+	// Title prefix absent → no match.
+	h.ghRunner = fakeGhRunner(t, map[string]string{
+		"pr list": `[{"number":1,"title":"unrelated PR","url":"https://github.com/test-owner/test-bucket/pull/1"}]`,
+		"pr view": `{"files":[{"path":"bucket/git-kura.json"}]}`,
+	})
+	_, exists, err := h.detectExistingPR(bucket)
+	if err != nil {
+		t.Fatalf("detectExistingPR: %v", err)
+	}
+	if exists {
+		t.Error("should not detect PR without [git-kura] prefix")
+	}
+
+	// File absent → no match.
+	h.ghRunner = fakeGhRunner(t, map[string]string{
+		"pr list": `[{"number":2,"title":"[git-kura] v0.0.6 update release","url":"https://github.com/test-owner/test-bucket/pull/2"}]`,
+		"pr view": `{"files":[{"path":"bucket/other.json"}]}`,
+	})
+	_, exists, err = h.detectExistingPR(bucket)
+	if err != nil {
+		t.Fatalf("detectExistingPR: %v", err)
+	}
+	if exists {
+		t.Error("should not detect PR without bucket/git-kura.json in files")
+	}
+
+	// All three conditions met → detected.
+	existingURL := "https://github.com/test-owner/test-bucket/pull/3"
+	h.ghRunner = fakeGhRunner(t, map[string]string{
+		"pr list": fmt.Sprintf(`[{"number":3,"title":"[git-kura] v0.0.6 update release","url":%q}]`, existingURL),
+		"pr view": `{"files":[{"path":"bucket/git-kura.json"}]}`,
+	})
+	gotURL, exists, err := h.detectExistingPR(bucket)
+	if err != nil {
+		t.Fatalf("detectExistingPR: %v", err)
+	}
+	if !exists {
+		t.Error("expected existing PR to be detected")
+	}
+	if gotURL != existingURL {
+		t.Errorf("got URL %q, want %q", gotURL, existingURL)
+	}
+}
+
 func newTestHandler(t *testing.T) (*Handler, *httptest.Server) {
 	t.Helper()
 	return newTestHandlerWithRelease(t, defaultAssets, defaultChecksumContent())
@@ -457,6 +849,8 @@ func newTestHandlerWithRelease(t *testing.T, assets func(string) []githubAsset, 
 	h := New()
 	h.apiBaseURL = srv.URL
 	h.ownerRepo = func() (string, string, error) { return "tooppoo", "git-kura", nil }
+	h.ghRunner = fakeGhRunnerSuccess(t)
+	h.bucketOwnerRepo = fakeBucketOwnerRepo()
 	return h, srv
 }
 
@@ -471,6 +865,24 @@ func defaultAssets(baseURL string) []githubAsset {
 func defaultChecksumContent() string {
 	return testAMD64Hash + "  git-kura_v0.0.7_Windows_x86_64.zip\n" +
 		testARM64Hash + "  git-kura_v0.0.7_Windows_arm64.zip\n"
+}
+
+func targetManifestContent(baseURL string) []byte {
+	return []byte(fmt.Sprintf(`{
+  "architecture": {
+    "64bit": {
+      "hash": "%s",
+      "url": "%s/downloads/git-kura_v0.0.7_Windows_x86_64.zip"
+    },
+    "arm64": {
+      "hash": "%s",
+      "url": "%s/downloads/git-kura_v0.0.7_Windows_arm64.zip"
+    }
+  },
+  "bin": "git-kura.exe",
+  "version": "0.0.7"
+}
+`, testAMD64Hash, baseURL, testARM64Hash, baseURL))
 }
 
 func planForHandler(t *testing.T, h *Handler, version string) *schema.ReleasePlanEnvelope {
@@ -510,10 +922,12 @@ func replacePlanPayload(t *testing.T, plan *schema.ReleasePlanEnvelope, p planPa
 	plan.Payload.StepData = raw
 }
 
+// newBucketRepo creates a temporary git repository representing a Scoop bucket.
+// No remote is added; use newBucketRepoWithRemote for exec tests that require push.
 func newBucketRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	git(t, dir, "init")
+	git(t, dir, "init", "-b", "main")
 	git(t, dir, "config", "user.email", "test@example.com")
 	git(t, dir, "config", "user.name", "Test")
 	if err := os.MkdirAll(filepath.Join(dir, "bucket"), 0o755); err != nil {
@@ -540,6 +954,18 @@ func newBucketRepo(t *testing.T) string {
 	git(t, dir, "add", ".")
 	git(t, dir, "commit", "-m", "init")
 	return dir
+}
+
+// newBucketRepoWithRemote creates a bucket repo backed by a local bare repo for push tests.
+// Returns (bucketPath, remotePath).
+func newBucketRepoWithRemote(t *testing.T) (string, string) {
+	t.Helper()
+	bucket := newBucketRepo(t)
+	remoteDir := t.TempDir()
+	git(t, remoteDir, "init", "--bare")
+	git(t, bucket, "remote", "add", "origin", remoteDir)
+	git(t, bucket, "push", "origin", "HEAD:main")
+	return bucket, remoteDir
 }
 
 func git(t *testing.T, dir string, args ...string) {
