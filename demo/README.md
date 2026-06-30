@@ -1,5 +1,8 @@
 # Conflict Observation Demo
 
+<video src="https://github.com/user-attachments/assets/be7a25b4-ac29-45c8-a250-3453bd543875"></video>
+
+
 This demo is designed to help you observe how merge conflicts are detected after parallel work by multiple agents using git-kura.
 
 This directory is not a demo execution tool.
