@@ -1,6 +1,7 @@
 name: Bug report
 description: Report incorrect behavior, unexpected behavior, or a regression in git-kura
 title: "[bug]"
+labels: ["bug"]
 body:
   - type: markdown
     attributes:
