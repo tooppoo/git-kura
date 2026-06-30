@@ -40,16 +40,34 @@ export PATH="$HOME/.local/bin:$PATH"
 
 Git recognises `git-kura` as the external subcommand `git kura` automatically once the binary is on `PATH`.
 
+### Uninstall
+
+The curl installer does not write package-manager metadata. To uninstall a default curl installation, remove the installed binary:
+
+```sh
+rm -f "$HOME/.local/bin/git-kura"
+```
+
+If you installed with `--install-dir`, remove `git-kura` from that directory instead:
+
+```sh
+rm -f "$HOME/bin/git-kura"
+```
+
+This removes only the `git-kura` executable installed by the curl installer. Repository-local state and tool components installed later with `git kura tools install ...` are managed separately.
 
 ### Verification
 
 The installer always verifies the SHA-256 checksum of the downloaded archive against `checksums.txt` from the same release. A mismatch causes the installer to abort before touching `~/.local/bin`.
 
 If `cosign` is on your `PATH`, the installer additionally verifies the `checksums.txt` signature bundle (`checksums.txt.sigstore.json`) published with each release. You can make this check mandatory with `--require-signature`.
-ura`. Place it somewhere on `PATH`:
+
+## Manual archive install
+
+Download and extract a release archive, then place `git-kura` somewhere on `PATH`:
 
 ```sh
-cp ./bin/git-kura ~/.local/bin/git-kura
+cp ./git-kura ~/.local/bin/git-kura
 ```
 
 ## Dev Container
@@ -71,7 +89,7 @@ On Windows, `git-kura` can be installed from the Philomagi Scoop bucket:
 ```powershell
 scoop bucket add philomagi https://github.com/tooppoo/catalog-scoop-bucket
 scoop install git-kura
-````
+```
 
 After installation, verify that Git external subcommand are available:
 
