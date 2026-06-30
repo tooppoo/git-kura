@@ -349,6 +349,9 @@ func (h *Handler) validate(plan *schema.ReleasePlanEnvelope) ([]string, []string
 	if err := validateBucketRepo(p.BucketPath); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := validateBucketBaseBranch(p.BucketPath); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if err := validateManifestFile(p.ManifestPath); err != nil {
 		errs = append(errs, err.Error())
 	}
@@ -652,6 +655,21 @@ func validateBucketRepo(bucket string) error {
 	return nil
 }
 
+func validateBucketBaseBranch(bucket string) error {
+	branch, err := gitCapture(bucket, "branch", "--show-current")
+	if err != nil {
+		return fmt.Errorf("resolve bucket repository current branch: %w", err)
+	}
+	current := strings.TrimSpace(branch)
+	if current != "main" {
+		if current == "" {
+			current = "(detached HEAD)"
+		}
+		return fmt.Errorf("bucket repository must be on main before creating Scoop PR branch; current branch is %q", current)
+	}
+	return nil
+}
+
 func samePath(a, b string) bool {
 	clean := func(p string) string {
 		if resolved, err := filepath.EvalSymlinks(p); err == nil {
@@ -743,16 +761,22 @@ func ensureOnlyManifestDiff(bucket string) error {
 	}
 	allowed := filepath.ToSlash(filepath.Join("bucket", "git-kura.json"))
 	var unexpected []string
+	hasManifestDiff := false
 	for _, line := range strings.Split(strings.TrimRight(status, "\n"), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		if !allPathsAllowed(porcelainPaths(line), allowed) {
+		if allPathsAllowed(porcelainPaths(line), allowed) {
+			hasManifestDiff = true
+		} else {
 			unexpected = append(unexpected, line)
 		}
 	}
 	if len(unexpected) > 0 {
 		return fmt.Errorf("bucket repository has unexpected diff outside %s:\n%s", allowed, strings.Join(unexpected, "\n"))
+	}
+	if !hasManifestDiff {
+		return fmt.Errorf("bucket repository has no manifest diff for %s after update", allowed)
 	}
 	return nil
 }

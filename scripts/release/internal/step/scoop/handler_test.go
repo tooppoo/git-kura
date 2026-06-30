@@ -302,6 +302,23 @@ func TestValidateWithData_BucketRemoteNotGitHubFails(t *testing.T) {
 	}
 }
 
+func TestValidateWithData_BucketMustStartOnMain(t *testing.T) {
+	bucket, _ := newBucketRepoWithRemote(t)
+	git(t, bucket, "checkout", "-b", "work")
+	h, srv := newTestHandler(t)
+	defer srv.Close()
+	h.SetOptions(step.Options{Bucket: bucket})
+	plan := planForHandler(t, h, "v0.0.7")
+
+	errs, _, _, err := h.ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("unexpected internal error: %v", err)
+	}
+	if !contains(errs, "must be on main") {
+		t.Fatalf("expected main branch validation error, got %v", errs)
+	}
+}
+
 func TestPreflightWithResult_DetectsBucketMismatch(t *testing.T) {
 	bucket := newBucketRepo(t)
 	other := t.TempDir()
@@ -443,6 +460,48 @@ func TestPreflightAndExec_CreatesBranchCommitsAndCreatesPR(t *testing.T) {
 	}
 	if !strings.Contains(capturedPRBody, "does not mean the Scoop package manager update is complete") {
 		t.Errorf("PR body missing completion note: %q", capturedPRBody)
+	}
+}
+
+func TestExec_FailsWhenManifestUpdateProducesNoDiffAndKeepsMain(t *testing.T) {
+	bucket, _ := newBucketRepoWithRemote(t)
+	h, srv := newTestHandler(t)
+	defer srv.Close()
+
+	if err := os.WriteFile(filepath.Join(bucket, "bucket", "git-kura.json"), targetManifestContent(srv.URL), 0o644); err != nil {
+		t.Fatalf("write target manifest: %v", err)
+	}
+	git(t, bucket, "add", "bucket/git-kura.json")
+	git(t, bucket, "commit", "-m", "already update manifest")
+
+	h.SetOptions(step.Options{Bucket: bucket})
+	plan := planForHandler(t, h, "v0.0.7")
+	_, _, raw, err := h.ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("ValidateWithData: %v", err)
+	}
+	result := &schema.ValidateResult{
+		SchemaVersion: schema.ValidateSchemaVersion,
+		Kind:          schema.ValidateKind,
+		TargetVersion: "v0.0.7",
+		StepName:      "scoop",
+		Status:        schema.ValidateStatusSuccess,
+		StepData:      raw,
+	}
+	if err := h.PreflightWithResult(plan, result); err != nil {
+		t.Fatalf("PreflightWithResult: %v", err)
+	}
+
+	err = h.Exec(plan)
+	if err == nil {
+		t.Fatal("expected Exec to fail when manifest update produces no diff")
+	}
+	if !strings.Contains(err.Error(), "no manifest diff") {
+		t.Errorf("expected no manifest diff error, got %v", err)
+	}
+	branchName := strings.TrimSpace(gitOutput(t, bucket, "branch", "--show-current"))
+	if branchName != "main" {
+		t.Errorf("expected bucket to remain on main, got %q", branchName)
 	}
 }
 
@@ -808,6 +867,24 @@ func defaultChecksumContent() string {
 		testARM64Hash + "  git-kura_v0.0.7_Windows_arm64.zip\n"
 }
 
+func targetManifestContent(baseURL string) []byte {
+	return []byte(fmt.Sprintf(`{
+  "architecture": {
+    "64bit": {
+      "hash": "%s",
+      "url": "%s/downloads/git-kura_v0.0.7_Windows_x86_64.zip"
+    },
+    "arm64": {
+      "hash": "%s",
+      "url": "%s/downloads/git-kura_v0.0.7_Windows_arm64.zip"
+    }
+  },
+  "bin": "git-kura.exe",
+  "version": "0.0.7"
+}
+`, testAMD64Hash, baseURL, testARM64Hash, baseURL))
+}
+
 func planForHandler(t *testing.T, h *Handler, version string) *schema.ReleasePlanEnvelope {
 	t.Helper()
 	raw, err := h.BuildPayload(version)
@@ -850,7 +927,7 @@ func replacePlanPayload(t *testing.T, plan *schema.ReleasePlanEnvelope, p planPa
 func newBucketRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	git(t, dir, "init")
+	git(t, dir, "init", "-b", "main")
 	git(t, dir, "config", "user.email", "test@example.com")
 	git(t, dir, "config", "user.name", "Test")
 	if err := os.MkdirAll(filepath.Join(dir, "bucket"), 0o755); err != nil {
