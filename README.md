@@ -13,6 +13,8 @@ It helps humans, AI coding agents, and reviewers run multiple task-specific work
 
 ![A screenshot showing when `git-kura` detects a conflict and the agent stops running](./docs/assets/image.png)
 
+## Demonstration
+
 Demonstration is prepared in [demo/](./demo)
 
 ## Why Kura?
