@@ -1,0 +1,80 @@
+name: Feature request
+description: Propose a new feature, command, option, or behavior for git-kura
+title: "[feat]"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to propose a new feature for git-kura.
+        Please describe the goal, expected behavior, scope, and acceptance criteria clearly.
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: Purpose
+      description: Describe the problem this feature solves or the user scenario it enables.
+      placeholder: |
+        Example:
+        - I want to list the state of multiple worktrees to detect potential merge conflicts early.
+        - I want git-kura to expose machine-readable output for AI agents.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-behavior
+    attributes:
+      label: Proposed behavior
+      description: Describe the command, option, output, or workflow you want to add.
+      placeholder: |
+        Example:
+        - Add `git kura status --json`.
+        - Keep human-readable output, JSON output, and TOON output semantically equivalent where possible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Separate what this issue includes from what it excludes.
+      placeholder: |
+        ## In scope
+        - ...
+
+        ## Out of scope
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: output-format
+    attributes:
+      label: Output format impact
+      description: Explain any impact this may have on human-readable output, JSON, TOON or schema validation.
+      placeholder: |
+        - Human-readable output:
+        - JSON:
+        - TOON:
+        - JSON Schema:
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: List the conditions required to consider this issue complete.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Add related issues, PRs, ADRs, existing implementation notes, or references.
+    validations:
+      required: false
