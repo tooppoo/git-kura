@@ -1,0 +1,87 @@
+name: Specification change
+description: Propose a change to an existing specification, design policy, or documented behavior in git-kura
+title: "[spec]"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to propose a specification change for git-kura.
+        Please describe the current specification, the problem, the proposed specification, compatibility impact, and migration policy.
+
+  - type: textarea
+    id: current-spec
+    attributes:
+      label: Current specification
+      description: Describe the current specification, implementation, or documented behavior.
+      placeholder: |
+        - Current specification:
+        - Related documentation:
+        - Related issues/ADRs:
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Explain why the current specification should be changed.
+      placeholder: |
+        Example:
+        - The concept is ambiguous.
+        - The implementation conflicts with the documentation.
+        - Release distribution assumptions are mixed with package manager assumptions.
+        - The output is unstable as input for AI agents.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-spec
+    attributes:
+      label: Proposed specification
+      description: Describe the new specification in enough detail for implementation.
+      placeholder: |
+        - ...
+        - ...
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and migration
+      description: Describe the impact on existing users, commands, output formats, and documentation.
+      placeholder: |
+        - Breaking change:
+        - Migration:
+        - Deprecated behavior:
+        - Backward compatibility:
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Test and verification plan
+      description: Describe how this specification change should be verified.
+      placeholder: |
+        - Unit test:
+        - Integration test:
+        - E2E:
+        - Schema validation:
+        - Documentation consistency:
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: List the conditions required to consider this specification change complete.
+      placeholder: |
+        - [ ] Specification documentation is updated
+        - [ ] Implementation follows the new specification
+        - [ ] Conflicts with the previous specification are resolved
+        - [ ] ADR is added or updated if needed
+    validations:
+      required: true
