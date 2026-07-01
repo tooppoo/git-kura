@@ -20,7 +20,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
-  "time"
+	"time"
 
 	"github.com/tooppoo/git-kura/scripts/release/internal/schema"
 	"github.com/tooppoo/git-kura/scripts/release/internal/step"
@@ -51,7 +51,7 @@ type Handler struct {
 // New returns a Handler for the homebrew step.
 func New() *Handler {
 	return &Handler{
-    httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{Timeout: 30 * time.Second},
 		apiBaseURL: "https://api.github.com",
 		ownerRepo:  githubOwnerRepo,
 	}
