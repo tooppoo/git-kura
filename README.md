@@ -168,13 +168,10 @@ Apache License 2.0
 
 - https://github.com/tooppoo/catalog-devcontainer-features
 
-### macOS Release
+### Homebrew
 
 - https://github.com/tooppoo/homebrew-tap-catalog
 
-### Windows Release
+### Scoop
 
 - https://github.com/tooppoo/catalog-scoop-bucket
-- https://github.com/tooppoo/winget-pkgs
-- https://github.com/russellbanks/Komac
-- https://github.com/microsoft/winget-pkgs
