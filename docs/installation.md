@@ -82,7 +82,7 @@ cp ./git-kura ~/.local/bin/git-kura
 
 detail: [tooppoo/catalog-devcontainer-features : src/git-kura](https://github.com/tooppoo/catalog-devcontainer-features/tree/main/src/git-kura)
 
-## Homebrew (macOS only)
+## Homebrew (Linux and macOS)
 
 ```
 brew tap tooppoo/tap-catalog
@@ -90,37 +90,6 @@ brew install tooppoo/tap-catalog/git-kura
 ```
 
 detail: <https://github.com/tooppoo/catalog-devcontainer-features>
-
-## Homebrew (macOS)
-
-On macOS, `git-kura` can be installed from the project-owned Homebrew tap `tooppoo/tap-catalog`. The tap repository is `tooppoo/homebrew-tap-catalog`, and Homebrew addresses it with the shortened name `tooppoo/tap-catalog`.
-
-```sh
-brew install tooppoo/tap-catalog/git-kura
-```
-
-Alternatively, add the tap once and then install by the short formula name:
-
-```sh
-brew tap tooppoo/tap-catalog
-brew install git-kura
-```
-
-After installation, verify that the Git external subcommand is available:
-
-```sh
-git kura -v
-```
-
-To uninstall:
-
-```sh
-brew uninstall git-kura
-```
-
-The Homebrew formula covers macOS on Apple Silicon (arm64) and Intel (x86_64). It reuses the same `Darwin` release archives and `checksums.txt` that the curl installer downloads, so no Homebrew-only release assets are published. Linuxbrew is not supported by this tap; on Linux use the curl installer or a manual archive install instead.
-
-The three macOS-capable methods differ in what they manage. The curl installer places a single binary in `~/.local/bin` and writes no package metadata, so you uninstall it by removing the binary. Homebrew tracks `git-kura` as a managed formula, so `brew upgrade` and `brew uninstall` manage upgrades and removal for you. A manual archive install is unmanaged: you place and remove the binary yourself. Scoop is the equivalent managed option on Windows.
 
 ## Scoop (Windows)
 
