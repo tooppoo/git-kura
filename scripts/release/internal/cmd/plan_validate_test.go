@@ -90,6 +90,52 @@ func TestNewRootCommand_Plan_UnknownStep(t *testing.T) {
 	}
 }
 
+// TestNewRootCommand_TapOptionPassedToOptionAwareHandler verifies that CLI
+// options are still propagated into step.OptionAware handlers via
+// configureHandler across plan/validate/exec. The homebrew step depends on
+// --tap, so --tap stands in for the surviving option here.
+func TestNewRootCommand_TapOptionPassedToOptionAwareHandler(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+
+	tap := filepath.Join(dir, "tap-repo")
+	h := &optionAwareTracker{}
+	r := placeholder.NewDefaultRegistry()
+	r.Register(step.StepTag, h)
+	root := cmd.NewRootCommand(r)
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+
+	root.SetArgs([]string{"plan", "--version", "v0.0.7", "--step", "tag", "--tap", tap})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("plan command failed: %v", err)
+	}
+	root.SetArgs([]string{"validate", "--version", "v0.0.7", "--step", "tag", "--tap", tap})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("validate command failed: %v", err)
+	}
+	root.SetArgs([]string{"exec", "--version", "v0.0.7", "--step", "tag", "--tap", tap})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("exec command failed: %v", err)
+	}
+
+	if h.buildTap != tap {
+		t.Errorf("BuildPayload saw tap %q, want %q", h.buildTap, tap)
+	}
+	if h.validateTap != tap {
+		t.Errorf("ValidateWithData saw tap %q, want %q", h.validateTap, tap)
+	}
+	if h.preflightTap != tap {
+		t.Errorf("PreflightWithResult saw tap %q, want %q", h.preflightTap, tap)
+	}
+	if h.execTap != tap {
+		t.Errorf("Exec saw tap %q, want %q", h.execTap, tap)
+	}
+	if !h.preflightWithResultCalled {
+		t.Error("exec should use PreflightWithResult when handler implements ResultPreflighter")
+	}
+}
+
 func TestNewRootCommand_Validate_FailureWritesResult(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
@@ -148,6 +194,35 @@ func TestNewRootCommand_Validate_UnknownStep(t *testing.T) {
 	root.SetArgs([]string{"validate", "--version", "v0.0.1", "--step", "noop"})
 	if err := root.Execute(); err == nil {
 		t.Fatal("expected error for unknown step")
+	}
+}
+
+func TestNewRootCommand_Validate_TamperedPayload(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+
+	r := placeholder.NewDefaultRegistry()
+	root := cmd.NewRootCommand(r)
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+
+	root.SetArgs([]string{"plan", "--version", "v0.0.1", "--step", "tag"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("plan command failed: %v", err)
+	}
+
+	// Tamper the payload without updating payloadHash.
+	planPath := filepath.Join(".git-kura", "release", "v0.0.1", "tag", "plan.json")
+	b, _ := os.ReadFile(planPath)
+	var envelope schema.ReleasePlanEnvelope
+	_ = json.Unmarshal(b, &envelope)
+	envelope.Payload.StepData = json.RawMessage(`{"injected":"data"}`)
+	out, _ := json.MarshalIndent(envelope, "", "  ")
+	_ = os.WriteFile(planPath, out, 0o644)
+
+	root.SetArgs([]string{"validate", "--version", "v0.0.1", "--step", "tag"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected validate to fail when plan payload has been tampered")
 	}
 }
 
@@ -498,3 +573,51 @@ func (h *alwaysFailHandler) Validate(_ *schema.ReleasePlanEnvelope) ([]string, [
 }
 func (h *alwaysFailHandler) Preflight(_ *schema.ReleasePlanEnvelope) error { return nil }
 func (h *alwaysFailHandler) Exec(_ *schema.ReleasePlanEnvelope) error      { return nil }
+
+// optionAwareTracker is a step.Handler that implements OptionAware,
+// DetailedValidator, and ResultPreflighter. It records the Options.Tap value it
+// sees at each stage so tests can assert that CLI options propagate through
+// configureHandler across plan/validate/exec.
+type optionAwareTracker struct {
+	options                   step.Options
+	buildTap                  string
+	validateTap               string
+	preflightTap              string
+	execTap                   string
+	preflightWithResultCalled bool
+}
+
+func (h *optionAwareTracker) SetOptions(options step.Options) {
+	h.options = options
+}
+
+func (h *optionAwareTracker) BuildPayload(_ string) (json.RawMessage, error) {
+	h.buildTap = h.options.Tap
+	return json.Marshal(map[string]string{})
+}
+
+func (h *optionAwareTracker) Validate(_ *schema.ReleasePlanEnvelope) ([]string, []string, error) {
+	h.validateTap = h.options.Tap
+	return nil, nil, nil
+}
+
+func (h *optionAwareTracker) ValidateWithData(_ *schema.ReleasePlanEnvelope) ([]string, []string, json.RawMessage, error) {
+	h.validateTap = h.options.Tap
+	raw, err := json.Marshal(map[string]string{"tap": h.options.Tap})
+	return nil, nil, raw, err
+}
+
+func (h *optionAwareTracker) Preflight(_ *schema.ReleasePlanEnvelope) error {
+	return nil
+}
+
+func (h *optionAwareTracker) PreflightWithResult(_ *schema.ReleasePlanEnvelope, _ *schema.ValidateResult) error {
+	h.preflightTap = h.options.Tap
+	h.preflightWithResultCalled = true
+	return nil
+}
+
+func (h *optionAwareTracker) Exec(_ *schema.ReleasePlanEnvelope) error {
+	h.execTap = h.options.Tap
+	return nil
+}
