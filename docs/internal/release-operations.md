@@ -2,7 +2,7 @@
 
 This document describes the maintainer-facing release support workflow for git-kura release steps that are implemented outside the shipped `git kura` CLI. The release support entry point is `go run ./scripts/release ...`.
 
-Winget release operation is not covered yet. This document covers the implemented `tag`, `scoop`, and `homebrew` steps, plus the `release-asset` validate-only step that the Scoop and Homebrew steps depend on.
+Winget release operation is not covered yet. This document covers the implemented `tag`, `scoop`, and `homebrew` steps, plus the optional `release-asset` validate-only step that can be run to cross-check GitHub Release assets before package-manager steps.
 
 ## Command model
 
@@ -31,7 +31,7 @@ Run the implemented non-Winget release operations in this order:
 3. `scoop`
 4. `homebrew`
 
-The `tag` step creates and pushes the release tag. The release workflow attached to that tag publishes the GitHub Release assets. The `release-asset` step then verifies those assets before package-manager steps use their URLs and checksums. The `scoop` step updates the external Scoop bucket manifest from the validated GitHub Release asset metadata. The `homebrew` step updates the external Homebrew tap formula from the validated macOS release asset metadata. The `scoop` and `homebrew` steps are independent of each other; run whichever platforms you are releasing, in any order, after `release-asset` validate.
+The `tag` step creates and pushes the release tag. The release workflow attached to that tag publishes the GitHub Release assets. The `release-asset` step can then be used to verify those assets before running package-manager steps. The `scoop` step updates the external Scoop bucket manifest, and the `homebrew` step updates the external Homebrew tap formula; both steps fetch and validate the needed GitHub Release asset URLs and sha256 checksums themselves. The `scoop` and `homebrew` steps are independent of each other; run whichever platforms you are releasing, in any order, after the release workflow has published assets.
 
 ## Tag step
 
