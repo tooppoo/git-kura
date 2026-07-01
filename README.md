@@ -41,12 +41,6 @@ curl -fsSL https://raw.githubusercontent.com/tooppoo/git-kura/main/install.sh | 
 
 This installs `git-kura` into `~/.local/bin`. See [docs/installation.md](docs/installation.md) for version pinning, custom install directories, checksum verification, and other installation methods such as Homebrew on macOS and Scoop on Windows.
 
-On macOS you can also install from the project-owned Homebrew tap:
-
-```sh
-brew install tooppoo/tap-catalog/git-kura
-```
-
 It is recommended to install repository-local safety helpers:
 
 ```sh
