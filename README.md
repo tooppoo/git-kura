@@ -43,7 +43,7 @@ Install the latest release:
 curl -fsSL https://raw.githubusercontent.com/tooppoo/git-kura/main/install.sh | sh
 ```
 
-This installs `git-kura` into `~/.local/bin`. See [docs/installation.md](docs/installation.md) for version pinning, custom install directories, checksum verification, and other installation methods(i.e. Windows).
+This installs `git-kura` into `~/.local/bin`. See [docs/installation.md](docs/installation.md) for version pinning, custom install directories, checksum verification, and other installation methods such as Homebrew on macOS and Scoop on Windows.
 
 It is recommended to install repository-local safety helpers:
 
@@ -167,6 +167,10 @@ Apache License 2.0
 ### DevContainer
 
 - https://github.com/tooppoo/catalog-devcontainer-features
+
+### macOS Release
+
+- https://github.com/tooppoo/homebrew-tap-catalog
 
 ### Windows Release
 

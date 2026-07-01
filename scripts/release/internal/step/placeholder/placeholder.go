@@ -53,6 +53,7 @@ func NewDefaultRegistry() *step.Registry {
 	r.Register(step.StepTag, New(step.StepTag))
 	r.Register(step.StepReleaseAsset, New(step.StepReleaseAsset))
 	r.Register(step.StepScoop, New(step.StepScoop))
+	r.Register(step.StepHomebrew, New(step.StepHomebrew))
 	r.Register(step.StepWinget, New(step.StepWinget))
 	return r
 }

@@ -31,6 +31,7 @@ type Handler interface {
 // release steps. Handlers that do not need an option can ignore it.
 type Options struct {
 	Bucket string
+	Tap    string
 }
 
 // OptionAware is implemented by handlers that need command-line options in

@@ -2,7 +2,7 @@
 
 This document describes the maintainer-facing release support workflow for git-kura release steps that are implemented outside the shipped `git kura` CLI. The release support entry point is `go run ./scripts/release ...`.
 
-Winget release operation is not covered yet. This document covers the implemented `tag` and `scoop` steps, plus the `release-asset` validate-only step that the Scoop step depends on.
+Winget release operation is not covered yet. This document covers the implemented `tag`, `scoop`, and `homebrew` steps, plus the optional `release-asset` validate-only step that can be run to cross-check GitHub Release assets before package-manager steps.
 
 ## Command model
 
@@ -29,8 +29,9 @@ Run the implemented non-Winget release operations in this order:
 1. `tag`
 2. `release-asset` validate
 3. `scoop`
+4. `homebrew`
 
-The `tag` step creates and pushes the release tag. The release workflow attached to that tag publishes the GitHub Release assets. The `release-asset` step then verifies those assets before package-manager steps use their URLs and checksums. The `scoop` step updates the external Scoop bucket manifest from the validated GitHub Release asset metadata.
+The `tag` step creates and pushes the release tag. The release workflow attached to that tag publishes the GitHub Release assets. The `release-asset` step can then be used to verify those assets before running package-manager steps. The `scoop` step updates the external Scoop bucket manifest, and the `homebrew` step updates the external Homebrew tap formula; both steps fetch and validate the needed GitHub Release asset URLs and sha256 checksums themselves. The `scoop` and `homebrew` steps are independent of each other; run whichever platforms you are releasing, in any order, after the release workflow has published assets.
 
 ## Tag step
 
@@ -101,6 +102,36 @@ scoop uninstall git-kura
 ```
 
 When the manual PR is created, rely on the bucket repository's branch protection for force-push restrictions, direct-update restrictions, PR requirement, and code scanning. Waiting for code scanning is outside the current `scoop` step because this implementation stops at manifest update and local validation guidance.
+
+## Homebrew step
+
+The Homebrew step operates on an external Homebrew tap repository checkout (`tooppoo/homebrew-tap-catalog`). The tap repository path is passed with `--tap` and must point to the repository root, which is where the tap's `Formula/` directory lives.
+
+```sh
+go run ./scripts/release plan --version v0.0.7 --step homebrew --tap "$HOME/homebrew-tap-catalog"
+go run ./scripts/release validate --version v0.0.7 --step homebrew --tap "$HOME/homebrew-tap-catalog"
+go run ./scripts/release exec --version v0.0.7 --step homebrew --tap "$HOME/homebrew-tap-catalog"
+```
+
+Validation checks that the tap path is a clean git worktree at its repository root, that `Formula/git-kura.rb` exists, that the target macOS arm64 and amd64 archives exist in the GitHub Release, and that `checksums.txt` contains sha256 entries for those archives. `--tap` must match the path captured in the plan; using a different checkout at validate or exec time fails. The formula path is fixed at `Formula/git-kura.rb` and is not configurable.
+
+The `homebrew` step updates an existing formula; it does not create the initial `Formula/git-kura.rb`. Seeding the first formula, including its class name, `desc`, `homepage`, `install`, and `test do` blocks, is the tap repository's responsibility. The step relies on the Homebrew convention that each architecture block has a `url "..."` line immediately followed by its `sha256 "..."` line, and that a single `version "..."` line exists; each target must match exactly once or exec fails without writing.
+
+Execution updates only `Formula/git-kura.rb`: it sets the formula version to the target version without the leading `v`, and it writes the GitHub Release `browser_download_url` and sha256 checksum for the macOS arm64 and amd64 archives. After writing, the step verifies that the tap repository diff contains no paths other than `Formula/git-kura.rb`, prints that diff, and prints the Homebrew validation commands to run.
+
+Like the current Scoop implementation, the Homebrew step does not create a branch, commit, push, or GitHub pull request. After `exec`, review the printed diff and run the printed validation commands before creating the tap repository PR manually.
+
+Expected manual checks after `homebrew exec` include:
+
+```sh
+git -C "$HOME/homebrew-tap-catalog" diff -- Formula/git-kura.rb
+brew install ./Formula/git-kura.rb
+brew test git-kura
+brew audit --strict --online --formula ./Formula/git-kura.rb
+brew uninstall git-kura
+```
+
+The `brew install`, `brew audit`, and related commands are run from inside the tap repository checkout. Building `git-kura` archives and running `brew` are macOS operations, so run these checks on macOS even though `plan`, `validate`, and `exec` themselves run anywhere Go is available.
 
 ## Devcontainer bucket setup
 
