@@ -12,18 +12,19 @@ import (
 )
 
 func newPlanCommand(registry *step.Registry) *cobra.Command {
-	var version, stepName, bucket string
+	var version, stepName, bucket, tap string
 
 	c := &cobra.Command{
 		Use:   "plan",
 		Short: "Generate a release plan file for a given step",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runPlan(registry, version, stepName, step.Options{Bucket: bucket})
+			return runPlan(registry, version, stepName, step.Options{Bucket: bucket, Tap: tap})
 		},
 	}
 	c.Flags().StringVar(&version, "version", "", "Target version (vMAJOR.MINOR.PATCH)")
 	c.Flags().StringVar(&stepName, "step", "", stepFlagUsage())
 	c.Flags().StringVar(&bucket, "bucket", "", "Scoop bucket repository root path (used by --step scoop)")
+	c.Flags().StringVar(&tap, "tap", "", "Homebrew tap repository root path (used by --step homebrew)")
 	_ = c.MarkFlagRequired("version")
 	_ = c.MarkFlagRequired("step")
 	return c
