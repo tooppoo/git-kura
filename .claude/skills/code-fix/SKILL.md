@@ -1,6 +1,6 @@
 ---
 name: code-fix
-description: Ensure Go implementation changes are verified with make check, fix failures until success, and handle coverage failures by adding meaningful tests or using narrow, explicit Go coverage exclusions.
+description: Ensure Go implementation changes are verified with just check, fix failures until success, and handle coverage failures by adding meaningful tests or using narrow, explicit Go coverage exclusions.
 ---
 
 # go-make-check-verification
@@ -18,10 +18,10 @@ Use this skill whenever you modify Go implementation code, Go tests, build confi
 After changing implementation or test code, always run:
 
 ```sh id="cr99o0"
-make check
+just check
 ```
 
-If `make check` fails:
+If `just check` fails:
 
 1. Read the error message carefully.
 2. Identify the concrete failing category, such as:
@@ -34,12 +34,12 @@ If `make check` fails:
    * schema or fixture validation failure
    * coverage failure
 3. Fix the cause indicated by the error.
-4. Run `make check` again.
-5. Continue this loop until `make check` succeeds.
+4. Run `just check` again.
+5. Continue this loop until `just check` succeeds.
 
-Do not treat the task as complete while `make check` is still failing.
+Do not treat the task as complete while `just check` is still failing.
 
-If `make check` cannot be executed because of an environment limitation, missing tool, missing permission, network restriction, or external service failure, stop and report:
+If `just check` cannot be executed because of an environment limitation, missing tool, missing permission, network restriction, or external service failure, stop and report:
 
 * the exact command attempted
 * the exact error output
@@ -204,7 +204,7 @@ The task is complete only when:
 * the requested Go implementation change is made
 * relevant tests are added or updated when behavior changes
 * coverage failures are resolved by tests or justified narrow exclusions
-* `make check` succeeds
-* the final report states what was changed and that `make check` passed
+* `just check` succeeds
+* the final report states what was changed and that `just check` passed
 
-Do not claim success unless `make check` was actually run successfully.
+Do not claim success unless `just check` was actually run successfully.
