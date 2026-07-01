@@ -80,7 +80,16 @@ cp ./git-kura ~/.local/bin/git-kura
 }
 ```
 
-detail is: [tooppoo/catalog-devcontainer-features : src/git-kura](https://github.com/tooppoo/catalog-devcontainer-features/tree/main/src/git-kura)
+detail: [tooppoo/catalog-devcontainer-features : src/git-kura](https://github.com/tooppoo/catalog-devcontainer-features/tree/main/src/git-kura)
+
+## Homebrew (macOS only)
+
+```
+brew tap tooppoo/tap-catalog
+brew install tooppoo/tap-catalog/git-kura
+```
+
+detail: <https://github.com/tooppoo/catalog-devcontainer-features>
 
 ## Scoop (Windows)
 
@@ -102,6 +111,8 @@ To uninstall:
 ```powershell
 scoop uninstall git-kura
 ```
+
+detail: <https://github.com/tooppoo/catalog-scoop-bucket>
 
 ## Supported platforms
 
