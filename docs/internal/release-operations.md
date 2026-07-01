@@ -2,7 +2,7 @@
 
 This document describes the maintainer-facing release support workflow for git-kura release steps that are implemented outside the shipped `git kura` CLI. The release support entry point is `go run ./scripts/release ...`.
 
-Winget release operation is not covered yet. This document covers the implemented `tag`, `scoop`, and `homebrew` steps, plus the optional `release-asset` validate-only step that can be run to cross-check GitHub Release assets before package-manager steps.
+This document covers the implemented `tag` and `homebrew` steps, plus the optional `release-asset` validate-only step that can be run to cross-check GitHub Release assets before package-manager steps. Scoop bucket manifest updates are no longer a git-kura release step; they are handled by the `catalog-scoop-bucket` repository's own workflow (see the Scoop bucket update section below).
 
 ## Command model
 
@@ -24,14 +24,13 @@ Each plan has a `planId` and a `payloadHash`. The validate result records both. 
 
 ## Recommended order
 
-Run the implemented non-Winget release operations in this order:
+Run the implemented release operations in this order:
 
 1. `tag`
 2. `release-asset` validate
-3. `scoop`
-4. `homebrew`
+3. `homebrew`
 
-The `tag` step creates and pushes the release tag. The release workflow attached to that tag publishes the GitHub Release assets. The `release-asset` step can then be used to verify those assets before running package-manager steps. The `scoop` step updates the external Scoop bucket manifest, and the `homebrew` step updates the external Homebrew tap formula; both steps fetch and validate the needed GitHub Release asset URLs and sha256 checksums themselves. The `scoop` and `homebrew` steps are independent of each other; run whichever platforms you are releasing, in any order, after the release workflow has published assets.
+The `tag` step creates and pushes the release tag. The release workflow attached to that tag publishes the GitHub Release assets. The `release-asset` step can then be used to verify those assets before running package-manager steps. The `homebrew` step updates the external Homebrew tap formula; it fetches and validates the needed GitHub Release asset URLs and sha256 checksums itself. Run it after the release workflow has published assets. The Scoop bucket manifest update runs separately in the `catalog-scoop-bucket` repository's own workflow and is not part of this sequence.
 
 ## Tag step
 
@@ -63,45 +62,17 @@ go run ./scripts/release plan --version v0.0.7 --step release-asset
 go run ./scripts/release validate --version v0.0.7 --step release-asset
 ```
 
-Validation checks the GitHub Release for the expected platform archives, `checksums.txt`, `checksums.txt.sigstore.json`, SBOM files, tools archive, tools sidecar manifest, and the Windows archives used by package-manager steps. The Windows amd64 and arm64 archive URLs and checksum entries are recorded as package-manager asset data so `scoop` can independently validate the release asset URL and checksum it writes into the manifest.
+Validation checks the GitHub Release for the expected platform archives, `checksums.txt`, `checksums.txt.sigstore.json`, SBOM files, tools archive, tools sidecar manifest, and the Windows archives used by package-manager consumers. The Windows amd64 and arm64 archive URLs and checksum entries are recorded as package-manager asset data so the external Scoop bucket repository workflow can reference the release asset URL and checksum with architecture granularity.
 
 Because this step reads GitHub Release metadata, run it after the tag-triggered release workflow has completed and the release assets are visible.
 
-## Scoop step
+## Scoop bucket update
 
-The Scoop step operates on an external Scoop bucket repository checkout. The bucket repository path is passed with `--bucket` and must point to the repository root, not the `bucket/` subdirectory.
+git-kura's release script no longer updates the Scoop bucket manifest. The responsibility for updating `bucket/git-kura.json` in the `catalog-scoop-bucket` repository — computing the fixed version, `browser_download_url`, and sha256 checksum, creating the update branch, and opening the pull request — now lives in that repository's own workflow. git-kura does not know about the bucket manifest JSON structure, the bucket repository's branches, or its PR-creation flow.
 
-```sh
-go run ./scripts/release plan --version v0.0.7 --step scoop --bucket "$HOME/catalog-scoop-bucket"
-go run ./scripts/release validate --version v0.0.7 --step scoop --bucket "$HOME/catalog-scoop-bucket"
-go run ./scripts/release exec --version v0.0.7 --step scoop --bucket "$HOME/catalog-scoop-bucket"
-```
+After the release workflow has published the GitHub Release assets, run the `catalog-scoop-bucket` repository's manifest update workflow to produce the bucket update PR. See the bucket repository for its own operating instructions:
 
-The same commands can be run from Windows by using a Windows path for `--bucket`, for example:
-
-```powershell
-go run ./scripts/release plan --version v0.0.7 --step scoop --bucket "$HOME\catalog-scoop-bucket"
-go run ./scripts/release validate --version v0.0.7 --step scoop --bucket "$HOME\catalog-scoop-bucket"
-go run ./scripts/release exec --version v0.0.7 --step scoop --bucket "$HOME\catalog-scoop-bucket"
-```
-
-Validation checks that the bucket path is a clean git worktree at its repository root, `bucket/git-kura.json` exists, the manifest has both `64bit` and `arm64` architecture entries, the target Windows release archives exist in the GitHub Release, and `checksums.txt` contains sha256 entries for those archives. `--bucket` must match the path captured in the plan; using a different checkout at validate or exec time fails.
-
-Execution updates only `bucket/git-kura.json`: it sets the manifest version to the target version without the leading `v`, and it writes the GitHub Release `browser_download_url` and sha256 checksum for the Windows `64bit` and `arm64` archives. After writing, the step verifies that the bucket repository diff contains no paths other than `bucket/git-kura.json`, prints that diff, and prints the Scoop validation commands to run.
-
-The current Scoop implementation does not create a branch, commit, push, or GitHub pull request. After `exec`, review the printed diff and run the printed validation commands before creating the bucket repository PR manually. The step does not commit directly to the bucket repository `main` branch.
-
-Expected manual checks after `scoop exec` include:
-
-```sh
-git -C "$HOME/catalog-scoop-bucket" diff -- bucket/git-kura.json
-pwsh -NoProfile -File "$HOME/catalog-scoop-bucket/bin/checkver.ps1" git-kura
-pwsh -NoProfile -File "$HOME/catalog-scoop-bucket/bin/test.ps1" git-kura
-scoop install "$HOME/catalog-scoop-bucket/bucket/git-kura.json"
-scoop uninstall git-kura
-```
-
-When the manual PR is created, rely on the bucket repository's branch protection for force-push restrictions, direct-update restrictions, PR requirement, and code scanning. Waiting for code scanning is outside the current `scoop` step because this implementation stops at manifest update and local validation guidance.
+- <https://github.com/tooppoo/catalog-scoop-bucket>
 
 ## Homebrew step
 
@@ -119,7 +90,7 @@ The `homebrew` step updates an existing formula; it does not create the initial 
 
 Execution updates only `Formula/git-kura.rb`: it sets the formula version to the target version without the leading `v`, and it writes the GitHub Release `browser_download_url` and sha256 checksum for the macOS arm64 and amd64 archives. After writing, the step verifies that the tap repository diff contains no paths other than `Formula/git-kura.rb`, prints that diff, and prints the Homebrew validation commands to run.
 
-Like the current Scoop implementation, the Homebrew step does not create a branch, commit, push, or GitHub pull request. After `exec`, review the printed diff and run the printed validation commands before creating the tap repository PR manually.
+The Homebrew step does not create a branch, commit, push, or GitHub pull request. After `exec`, review the printed diff and run the printed validation commands before creating the tap repository PR manually.
 
 Expected manual checks after `homebrew exec` include:
 
@@ -133,18 +104,6 @@ brew uninstall git-kura
 
 The `brew install`, `brew audit`, and related commands are run from inside the tap repository checkout. Building `git-kura` archives and running `brew` are macOS operations, so run these checks on macOS even though `plan`, `validate`, and `exec` themselves run anywhere Go is available.
 
-## Devcontainer bucket setup
-
-The devcontainer setup helper can prepare the external bucket repository:
-
-```sh
-scripts/dev/setup-bucket-repo.sh
-```
-
-By default it uses `$HOME/catalog-scoop-bucket` and `https://github.com/tooppoo/catalog-scoop-bucket.git`. Override those with `GIT_KURA_SCOOP_BUCKET_DIR`, `GIT_KURA_SCOOP_BUCKET_URL`, and `GIT_KURA_SCOOP_BUCKET_REPO` when needed.
-
-This setup is intentionally limited to clone and existence checks. It verifies an existing directory before trusting it, does not destroy or repair existing directories, does not commit, push, or create PRs, and does not generate, store, or print tokens or secrets.
-
 ## Failure inspection
 
 To see how far a release operation got, inspect the local operation artifacts and the external systems touched by the step:
@@ -152,11 +111,11 @@ To see how far a release operation got, inspect the local operation artifacts an
 ```sh
 find .git-kura/release/v0.0.7 -maxdepth 3 -type f -print
 cat .git-kura/release/v0.0.7/tag/validate-result.json
-cat .git-kura/release/v0.0.7/scoop/validate-result.json
+cat .git-kura/release/v0.0.7/homebrew/validate-result.json
 git tag -l v0.0.7
 git ls-remote origin refs/tags/v0.0.7
-git -C "$HOME/catalog-scoop-bucket" status --short
-git -C "$HOME/catalog-scoop-bucket" diff -- bucket/git-kura.json
+git -C "$HOME/homebrew-tap-catalog" status --short
+git -C "$HOME/homebrew-tap-catalog" diff -- Formula/git-kura.rb
 ```
 
 A successful validate result means only that the step was safe at validation time. If `exec` fails, inspect the step-specific external state before retrying. Retrying should normally start from a fresh `plan -> validate -> exec` sequence so the `planId`, `payloadHash`, and preflight checks describe the exact operation being executed.

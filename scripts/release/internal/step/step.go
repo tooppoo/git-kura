@@ -10,13 +10,11 @@ type Step string
 const (
 	StepTag          Step = "tag"
 	StepReleaseAsset Step = "release-asset"
-	StepScoop        Step = "scoop"
 	StepHomebrew     Step = "homebrew"
-	StepWinget       Step = "winget"
 )
 
 // knownSteps is the canonical list of recognised release steps.
-var knownSteps = []Step{StepTag, StepReleaseAsset, StepScoop, StepHomebrew, StepWinget}
+var knownSteps = []Step{StepTag, StepReleaseAsset, StepHomebrew}
 
 // KnownNames returns the string names of all recognised steps.
 func KnownNames() []string {

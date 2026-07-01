@@ -11,7 +11,6 @@ import (
 	"github.com/tooppoo/git-kura/scripts/release/internal/schema"
 	"github.com/tooppoo/git-kura/scripts/release/internal/step"
 	"github.com/tooppoo/git-kura/scripts/release/internal/step/placeholder"
-	"github.com/tooppoo/git-kura/scripts/release/internal/step/scoop"
 )
 
 // chdir sets the working directory to dir and restores the original on cleanup.
@@ -88,157 +87,6 @@ func TestNewRootCommand_Plan_UnknownStep(t *testing.T) {
 	root.SetArgs([]string{"plan", "--version", "v0.0.1", "--step", "unknown-step"})
 	if err := root.Execute(); err == nil {
 		t.Fatal("expected error for unknown step, got nil")
-	}
-}
-
-func TestNewRootCommand_Plan_ScoopBucketOption(t *testing.T) {
-	dir := t.TempDir()
-	chdir(t, dir)
-
-	bucket := filepath.Join(dir, "bucket-repo")
-	if err := os.MkdirAll(bucket, 0o755); err != nil {
-		t.Fatalf("mkdir bucket: %v", err)
-	}
-
-	r := placeholder.NewDefaultRegistry()
-	r.Register(step.StepScoop, scoop.New())
-	root := cmd.NewRootCommand(r)
-	root.SetOut(io.Discard)
-	root.SetErr(io.Discard)
-	root.SetArgs([]string{"plan", "--version", "v0.0.7", "--step", "scoop", "--bucket", bucket})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("plan command failed: %v", err)
-	}
-
-	planPath := filepath.Join(".git-kura", "release", "v0.0.7", "scoop", "plan.json")
-	b, err := os.ReadFile(planPath)
-	if err != nil {
-		t.Fatalf("plan file not found: %v", err)
-	}
-	var envelope schema.ReleasePlanEnvelope
-	if err := json.Unmarshal(b, &envelope); err != nil {
-		t.Fatalf("parse plan: %v", err)
-	}
-	var stepData struct {
-		BucketPath   string `json:"bucketPath"`
-		ManifestPath string `json:"manifestPath"`
-	}
-	if err := json.Unmarshal(envelope.Payload.StepData, &stepData); err != nil {
-		t.Fatalf("parse stepData: %v", err)
-	}
-	if stepData.BucketPath != bucket {
-		t.Errorf("bucketPath = %q, want %q", stepData.BucketPath, bucket)
-	}
-	if stepData.ManifestPath != filepath.Join(bucket, "bucket", "git-kura.json") {
-		t.Errorf("manifestPath = %q", stepData.ManifestPath)
-	}
-}
-
-func TestNewRootCommand_Plan_ScoopRequiresBucket(t *testing.T) {
-	chdir(t, t.TempDir())
-
-	r := placeholder.NewDefaultRegistry()
-	r.Register(step.StepScoop, scoop.New())
-	root := cmd.NewRootCommand(r)
-	root.SetOut(io.Discard)
-	root.SetErr(io.Discard)
-	root.SetArgs([]string{"plan", "--version", "v0.0.7", "--step", "scoop"})
-	if err := root.Execute(); err == nil {
-		t.Fatal("expected --bucket requirement error")
-	}
-}
-
-func TestNewRootCommand_BucketOptionPassedToOptionAwareHandler(t *testing.T) {
-	dir := t.TempDir()
-	chdir(t, dir)
-
-	bucket := filepath.Join(dir, "bucket-repo")
-	h := &optionAwareTracker{}
-	r := placeholder.NewDefaultRegistry()
-	r.Register(step.StepTag, h)
-	root := cmd.NewRootCommand(r)
-	root.SetOut(io.Discard)
-	root.SetErr(io.Discard)
-
-	root.SetArgs([]string{"plan", "--version", "v0.0.7", "--step", "tag", "--bucket", bucket})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("plan command failed: %v", err)
-	}
-	root.SetArgs([]string{"validate", "--version", "v0.0.7", "--step", "tag", "--bucket", bucket})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("validate command failed: %v", err)
-	}
-	root.SetArgs([]string{"exec", "--version", "v0.0.7", "--step", "tag", "--bucket", bucket})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("exec command failed: %v", err)
-	}
-
-	if h.buildBucket != bucket {
-		t.Errorf("BuildPayload saw bucket %q, want %q", h.buildBucket, bucket)
-	}
-	if h.validateBucket != bucket {
-		t.Errorf("ValidateWithData saw bucket %q, want %q", h.validateBucket, bucket)
-	}
-	if h.preflightBucket != bucket {
-		t.Errorf("PreflightWithResult saw bucket %q, want %q", h.preflightBucket, bucket)
-	}
-	if h.execBucket != bucket {
-		t.Errorf("Exec saw bucket %q, want %q", h.execBucket, bucket)
-	}
-	if !h.preflightWithResultCalled {
-		t.Error("exec should use PreflightWithResult when handler implements ResultPreflighter")
-	}
-}
-
-func TestNewRootCommand_Validate_Success(t *testing.T) {
-	dir := t.TempDir()
-	chdir(t, dir)
-
-	r := placeholder.NewDefaultRegistry()
-
-	root := cmd.NewRootCommand(r)
-	root.SetOut(io.Discard)
-	root.SetErr(io.Discard)
-	root.SetArgs([]string{"plan", "--version", "v0.0.1", "--step", "scoop"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("plan command failed: %v", err)
-	}
-
-	root.SetArgs([]string{"validate", "--version", "v0.0.1", "--step", "scoop"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("validate command failed: %v", err)
-	}
-
-	resultPath := filepath.Join(".git-kura", "release", "v0.0.1", "scoop", "validate-result.json")
-	b, err := os.ReadFile(resultPath)
-	if err != nil {
-		t.Fatalf("validate result file not found: %v", err)
-	}
-
-	var result schema.ValidateResult
-	if err := json.Unmarshal(b, &result); err != nil {
-		t.Fatalf("parse validate result: %v", err)
-	}
-	if result.Status != schema.ValidateStatusSuccess {
-		t.Errorf("status = %q, want %q", result.Status, schema.ValidateStatusSuccess)
-	}
-	if result.TargetVersion != "v0.0.1" {
-		t.Errorf("targetVersion = %q, want v0.0.1", result.TargetVersion)
-	}
-	if result.StepName != "scoop" {
-		t.Errorf("stepName = %q, want scoop", result.StepName)
-	}
-	if result.PlanID == "" {
-		t.Error("planId must not be empty in validate result")
-	}
-	if result.PayloadHash == "" {
-		t.Error("payloadHash must not be empty in validate result")
-	}
-	if result.Errors == nil {
-		t.Error("errors field must be an empty slice, not nil")
-	}
-	if result.Warnings == nil {
-		t.Error("warnings field must be an empty slice, not nil")
 	}
 }
 
@@ -384,7 +232,10 @@ func TestExecRelease_SafetyGate_StepMismatch(t *testing.T) {
 	b, _ := os.ReadFile(resultPath)
 	var result schema.ValidateResult
 	_ = json.Unmarshal(b, &result)
-	result.StepName = "scoop"
+	// "winget" is an arbitrary step name that differs from the plan's step ("tag");
+	// the safety gate compares names as strings and does not look them up in the
+	// registry, so any non-matching literal exercises the mismatch branch.
+	result.StepName = "winget"
 	out, _ := json.MarshalIndent(result, "", "  ")
 	_ = os.WriteFile(resultPath, out, 0o644)
 
@@ -538,35 +389,6 @@ func TestExecRelease_SafetyGate_ResultWrongKind(t *testing.T) {
 	}
 }
 
-func TestNewRootCommand_Validate_TamperedPayload(t *testing.T) {
-	dir := t.TempDir()
-	chdir(t, dir)
-
-	r := placeholder.NewDefaultRegistry()
-	root := cmd.NewRootCommand(r)
-	root.SetOut(io.Discard)
-	root.SetErr(io.Discard)
-
-	root.SetArgs([]string{"plan", "--version", "v0.0.1", "--step", "winget"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("plan command failed: %v", err)
-	}
-
-	// Tamper the payload without updating payloadHash.
-	planPath := filepath.Join(".git-kura", "release", "v0.0.1", "winget", "plan.json")
-	b, _ := os.ReadFile(planPath)
-	var envelope schema.ReleasePlanEnvelope
-	_ = json.Unmarshal(b, &envelope)
-	envelope.Payload.StepData = json.RawMessage(`{"injected":"data"}`)
-	out, _ := json.MarshalIndent(envelope, "", "  ")
-	_ = os.WriteFile(planPath, out, 0o644)
-
-	root.SetArgs([]string{"validate", "--version", "v0.0.1", "--step", "winget"})
-	if err := root.Execute(); err == nil {
-		t.Fatal("expected validate to fail when plan payload has been tampered")
-	}
-}
-
 // TestExecRelease_SafetyGate_PayloadVersionMismatch verifies that exec rejects
 // a plan whose payload.targetVersion has been changed to a different version
 // even when the attacker has also updated payloadHash to match the new payload.
@@ -622,7 +444,10 @@ func TestExecRelease_SafetyGate_PayloadStepMismatch(t *testing.T) {
 	b, _ := os.ReadFile(planPath)
 	var envelope schema.ReleasePlanEnvelope
 	_ = json.Unmarshal(b, &envelope)
-	envelope.Payload.StepName = "scoop"
+	// "winget" is an arbitrary step name that differs from the CLI --step ("tag");
+	// the safety gate compares names as strings and does not look them up in the
+	// registry, so any non-matching literal exercises the mismatch branch.
+	envelope.Payload.StepName = "winget"
 	newHash := testPayloadHash(t, envelope.Payload)
 	envelope.PayloadHash = newHash
 	out, _ := json.MarshalIndent(envelope, "", "  ")
@@ -659,50 +484,6 @@ func (h *noopExecTracker) Validate(_ *schema.ReleasePlanEnvelope) ([]string, []s
 func (h *noopExecTracker) Preflight(_ *schema.ReleasePlanEnvelope) error { return nil }
 func (h *noopExecTracker) Exec(_ *schema.ReleasePlanEnvelope) error {
 	h.execCalled = true
-	return nil
-}
-
-type optionAwareTracker struct {
-	options                   step.Options
-	buildBucket               string
-	validateBucket            string
-	preflightBucket           string
-	execBucket                string
-	preflightWithResultCalled bool
-}
-
-func (h *optionAwareTracker) SetOptions(options step.Options) {
-	h.options = options
-}
-
-func (h *optionAwareTracker) BuildPayload(_ string) (json.RawMessage, error) {
-	h.buildBucket = h.options.Bucket
-	return json.Marshal(map[string]string{})
-}
-
-func (h *optionAwareTracker) Validate(_ *schema.ReleasePlanEnvelope) ([]string, []string, error) {
-	h.validateBucket = h.options.Bucket
-	return nil, nil, nil
-}
-
-func (h *optionAwareTracker) ValidateWithData(_ *schema.ReleasePlanEnvelope) ([]string, []string, json.RawMessage, error) {
-	h.validateBucket = h.options.Bucket
-	raw, err := json.Marshal(map[string]string{"bucket": h.options.Bucket})
-	return nil, nil, raw, err
-}
-
-func (h *optionAwareTracker) Preflight(_ *schema.ReleasePlanEnvelope) error {
-	return nil
-}
-
-func (h *optionAwareTracker) PreflightWithResult(_ *schema.ReleasePlanEnvelope, _ *schema.ValidateResult) error {
-	h.preflightBucket = h.options.Bucket
-	h.preflightWithResultCalled = true
-	return nil
-}
-
-func (h *optionAwareTracker) Exec(_ *schema.ReleasePlanEnvelope) error {
-	h.execBucket = h.options.Bucket
 	return nil
 }
 

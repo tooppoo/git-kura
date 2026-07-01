@@ -90,14 +90,14 @@ See [tools-asset-distribution.md](tools-asset-distribution.md) for the full spec
 
 ### Package manager Windows archives
 
-The Scoop and Winget update steps reference the Windows platform archives by their `browser_download_url` from the GitHub Release asset list. The relevant files and their expected filenames are:
+The external Scoop bucket repository workflow references the Windows platform archives by their `browser_download_url` from the GitHub Release asset list. The Scoop bucket manifest update is not a git-kura release step; it is performed by the `catalog-scoop-bucket` repository's own workflow. The relevant files and their expected filenames are:
 
 | Architecture | Filename                                  |
 |--------------|-------------------------------------------|
 | amd64        | `git-kura_v<VERSION>_Windows_x86_64.zip` |
 | arm64        | `git-kura_v<VERSION>_Windows_arm64.zip`  |
 
-These are the same files as the Windows platform archives. They are also recorded separately in the `release-asset` validate result as `package-manager-windows-archive` entries so that `scoop` and `winget` steps can reference them with architecture granularity.
+These are the same files as the Windows platform archives. They are also recorded separately in the `release-asset` validate result as `package-manager-windows-archive` entries so that the external Scoop bucket repository workflow can reference them with architecture granularity.
 
 ### Homebrew Formula macOS archives
 
@@ -127,7 +127,8 @@ git-kura-tools_<goreleaser_version>.tar.gz  (tools archive)
   └── git-kura-tools_<goreleaser_version>.json  (sidecar; provides archiveChecksum)
 
 Windows platform archives (amd64 + arm64)
-  └── referenced by browser_download_url for Scoop and Winget update steps
+  └── referenced by browser_download_url for the external
+        Scoop bucket repository workflow
 
 macOS (Darwin) platform archives (arm64 + amd64)
   └── referenced by browser_download_url + checksums.txt sha256 for the Homebrew update step
