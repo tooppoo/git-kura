@@ -100,18 +100,6 @@ scoop bucket add philomagi https://github.com/tooppoo/catalog-scoop-bucket
 scoop install git-kura
 ```
 
-After installation, verify that Git external subcommand are available:
-
-```powershell
-git kura -v
-```
-
-To uninstall:
-
-```powershell
-scoop uninstall git-kura
-```
-
 detail: <https://github.com/tooppoo/catalog-scoop-bucket>
 
 ## Supported platforms
