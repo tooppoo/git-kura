@@ -1,6 +1,7 @@
 // Package releaseasset implements the release-asset validate-only step.
 // It verifies that all expected GitHub Release assets exist and are accessible
-// before package-manager steps (scoop, winget) run.
+// before the homebrew step runs and before the external Scoop bucket repository
+// workflow consumes the Windows archives.
 //
 // This step has no external side effects and does not exec. Exec is explicitly
 // rejected to make the validate-only contract visible at runtime.
@@ -165,7 +166,8 @@ func (h *Handler) ValidateWithData(plan *schema.ReleasePlanEnvelope) ([]string, 
 	}
 
 	// 2. Package-manager Windows archives: same files as Windows platform
-	//    archives but recorded separately per arch for scoop/winget steps.
+	//    archives but recorded separately per arch for the external Scoop
+	//    bucket repository workflow.
 	waItems := make([]pendingArchive, 0, len(p.PackageManagerWindowsArchives))
 	for _, wa := range p.PackageManagerWindowsArchives {
 		r := assetResult{

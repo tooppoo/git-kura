@@ -2,10 +2,10 @@
 //
 // It updates Formula/git-kura.rb in an external Homebrew tap repository checkout
 // (tooppoo/homebrew-tap-catalog) to point at the macOS arm64/amd64 archives of a
-// GitHub Release. Unlike the scoop step, this step never commits, pushes, or
-// opens a pull request: exec updates the formula, confirms no other file changed,
-// prints the diff, and prints the Homebrew verification commands a maintainer
-// must run manually before creating the tap repository PR.
+// GitHub Release. This step never commits, pushes, or opens a pull request: exec
+// updates the formula, confirms no other file changed, prints the diff, and
+// prints the Homebrew verification commands a maintainer must run manually
+// before creating the tap repository PR.
 package homebrew
 
 import (
