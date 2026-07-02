@@ -69,8 +69,3 @@ signs:
       - "${artifact}"
       - "--yes"
     artifacts: checksum
-
-after:
-  hooks:
-    - go run ./scripts/release plan --version "{{ .Version }}" --step release-asset
-    - go run ./scripts/release validate --version "{{ .Version }}" --step release-asset
