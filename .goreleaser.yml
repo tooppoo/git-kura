@@ -34,13 +34,13 @@ archives:
     files:
       - README.md
       - LICENSE
-      - VERSION
       - third_party_licenses/**/*
 
 release:
   extra_files:
     - glob: .tools-dist/git-kura-tools_*.tar.gz
     - glob: .tools-dist/git-kura-tools_*.json
+    - glob: VERSION
 
 checksum:
   name_template: checksums.txt
