@@ -52,6 +52,5 @@ func NewDefaultRegistry() *step.Registry {
 	r := step.NewRegistry()
 	r.Register(step.StepTag, New(step.StepTag))
 	r.Register(step.StepReleaseAsset, New(step.StepReleaseAsset))
-	r.Register(step.StepHomebrew, New(step.StepHomebrew))
 	return r
 }

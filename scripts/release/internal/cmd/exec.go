@@ -15,33 +15,27 @@ var supportedPlanSchemaVersions = map[string]bool{
 
 // ExecRelease runs the exec command logic. Exposed for testing.
 func ExecRelease(registry *step.Registry, version, stepName string) error {
-	return runExec(registry, version, stepName, step.Options{})
-}
-
-// ExecReleaseWithOptions runs exec with step-specific command-line options.
-func ExecReleaseWithOptions(registry *step.Registry, version, stepName string, options step.Options) error {
-	return runExec(registry, version, stepName, options)
+	return runExec(registry, version, stepName)
 }
 
 func newExecCommand(registry *step.Registry) *cobra.Command {
-	var version, stepName, tap string
+	var version, stepName string
 
 	c := &cobra.Command{
 		Use:   "exec",
 		Short: "Execute a validated release plan",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runExec(registry, version, stepName, step.Options{Tap: tap})
+			return runExec(registry, version, stepName)
 		},
 	}
 	c.Flags().StringVar(&version, "version", "", "Target version (vMAJOR.MINOR.PATCH)")
 	c.Flags().StringVar(&stepName, "step", "", stepFlagUsage())
-	c.Flags().StringVar(&tap, "tap", "", "Homebrew tap repository root path (used by --step homebrew)")
 	_ = c.MarkFlagRequired("version")
 	_ = c.MarkFlagRequired("step")
 	return c
 }
 
-func runExec(registry *step.Registry, version, stepName string, options step.Options) error {
+func runExec(registry *step.Registry, version, stepName string) error {
 	if err := validateVersion(version); err != nil {
 		return err
 	}
@@ -49,7 +43,6 @@ func runExec(registry *step.Registry, version, stepName string, options step.Opt
 	if err != nil {
 		return err
 	}
-	configureHandler(h, options)
 
 	var plan schema.ReleasePlanEnvelope
 	if err := readJSON(planFilePath(version, string(s)), &plan); err != nil {
@@ -65,11 +58,7 @@ func runExec(registry *step.Registry, version, stepName string, options step.Opt
 		return err
 	}
 
-	if rp, ok := h.(step.ResultPreflighter); ok {
-		if err := rp.PreflightWithResult(&plan, &result); err != nil {
-			return fmt.Errorf("preflight check failed: %w", err)
-		}
-	} else if err := h.Preflight(&plan); err != nil {
+	if err := h.Preflight(&plan); err != nil {
 		return fmt.Errorf("preflight check failed: %w", err)
 	}
 

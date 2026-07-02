@@ -35,12 +35,6 @@ func parseStep(registry *step.Registry, name string) (step.Step, step.Handler, e
 	return s, h, nil
 }
 
-func configureHandler(h step.Handler, options step.Options) {
-	if oh, ok := h.(step.OptionAware); ok {
-		oh.SetOptions(options)
-	}
-}
-
 // planFilePath returns the path where the plan file is stored.
 // Path: .git-kura/release/<version>/<step>/plan.json
 func planFilePath(version, stepName string) string {

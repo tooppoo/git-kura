@@ -1,7 +1,7 @@
 // Package releaseasset implements the release-asset validate-only step.
 // It verifies that all expected GitHub Release assets exist and are accessible
-// before the homebrew step runs and before the external Scoop bucket repository
-// workflow consumes the Windows archives.
+// before external package-manager repository workflows consume platform
+// archive metadata.
 //
 // This step has no external side effects and does not exec. Exec is explicitly
 // rejected to make the validate-only contract visible at runtime.
