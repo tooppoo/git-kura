@@ -174,6 +174,9 @@ func TestBuildPlanPayload(t *testing.T) {
 	if p.ToolsSidecar != "git-kura-tools_0.0.7.json" {
 		t.Errorf("toolsSidecar = %q, want git-kura-tools_0.0.7.json", p.ToolsSidecar)
 	}
+	if p.VersionFile != "VERSION" {
+		t.Errorf("versionFile = %q, want VERSION", p.VersionFile)
+	}
 	for _, sa := range p.SBOMAssets {
 		want := sa.ArchiveFilename + ".sbom.json"
 		if sa.SBOMFilename != want {
@@ -192,6 +195,7 @@ func TestSelectUploadArtifactsUsesAllowlist(t *testing.T) {
 		{Name: "git-kura_v0.0.7_Linux_x86_64.tar.gz.sbom.json", Path: "dist/git-kura_v0.0.7_Linux_x86_64.tar.gz.sbom.json", Type: "SBOM"},
 		{Name: "git-kura-tools_0.0.7.tar.gz", Path: "dist/git-kura-tools_0.0.7.tar.gz", Type: "File"},
 		{Name: "git-kura-tools_0.0.7.json", Path: "dist/git-kura-tools_0.0.7.json", Type: "File"},
+		{Name: "VERSION", Path: "VERSION", Type: "File"},
 		{Name: "unrelated.txt", Path: "dist/unrelated.txt", Type: "File"},
 	}
 	got := selectUploadArtifacts(artifacts)
@@ -211,6 +215,7 @@ func TestSelectUploadArtifactsUsesAllowlist(t *testing.T) {
 		"git-kura_v0.0.7_Linux_x86_64.tar.gz.sbom.json",
 		"git-kura-tools_0.0.7.tar.gz",
 		"git-kura-tools_0.0.7.json",
+		"VERSION",
 	} {
 		if !names[name] {
 			t.Errorf("%s should be upload-selected", name)
@@ -219,7 +224,9 @@ func TestSelectUploadArtifactsUsesAllowlist(t *testing.T) {
 }
 
 func TestValidateWithDataLocalArtifactsSuccess(t *testing.T) {
-	dist := t.TempDir()
+	root := t.TempDir()
+	t.Chdir(root)
+	dist := filepath.Join(root, "dist")
 	output := filepath.Join(t.TempDir(), "github-output")
 	t.Setenv(envDistDir, dist)
 	t.Setenv("GITHUB_OUTPUT", output)
@@ -241,8 +248,11 @@ func TestValidateWithDataLocalArtifactsSuccess(t *testing.T) {
 	if err := json.Unmarshal(stepData, &data); err != nil {
 		t.Fatalf("parse stepData: %v", err)
 	}
-	if len(data.UploadFiles) != 16 {
-		t.Fatalf("uploadFiles length = %d, want 16", len(data.UploadFiles))
+	if len(data.UploadFiles) != 17 {
+		t.Fatalf("uploadFiles length = %d, want 17", len(data.UploadFiles))
+	}
+	if !containsString(data.UploadFiles, "VERSION") {
+		t.Fatalf("uploadFiles missing VERSION: %v", data.UploadFiles)
 	}
 	b, err := os.ReadFile(output)
 	if err != nil {
@@ -257,7 +267,9 @@ func TestValidateWithDataLocalArtifactsSuccess(t *testing.T) {
 }
 
 func TestValidateWithDataAddsToolsFromToolsDistWhenMissingFromArtifactsOutput(t *testing.T) {
-	dist := t.TempDir()
+	root := t.TempDir()
+	t.Chdir(root)
+	dist := filepath.Join(root, "dist")
 	toolsDist := filepath.Join(t.TempDir(), "tools-dist")
 	t.Setenv(envDistDir, dist)
 	t.Setenv(envToolsDistDir, toolsDist)
@@ -287,8 +299,60 @@ func TestValidateWithDataAddsToolsFromToolsDistWhenMissingFromArtifactsOutput(t 
 	}
 }
 
+func TestValidateWithDataAddsVersionFileFromRepositoryRootWhenMissingFromArtifactsOutput(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	dist := filepath.Join(root, "dist")
+	t.Setenv(envDistDir, dist)
+
+	plan := buildTestPlan(t, "v0.0.7")
+	writeReleaseFixture(t, dist, "v0.0.7", false)
+
+	errs, _, stepData, err := New().ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("ValidateWithData returned internal error: %v", err)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("errs = %v, want none", errs)
+	}
+	var data validateStepData
+	if err := json.Unmarshal(stepData, &data); err != nil {
+		t.Fatalf("parse stepData: %v", err)
+	}
+	if !containsString(data.UploadFiles, "VERSION") {
+		t.Fatalf("uploadFiles missing repository root VERSION: %v", data.UploadFiles)
+	}
+}
+
+func TestValidateWithDataVersionMismatchFails(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	dist := filepath.Join(root, "dist")
+	t.Setenv(envDistDir, dist)
+
+	plan := buildTestPlan(t, "v0.0.7")
+	writeReleaseFixture(t, dist, "v0.0.7", false)
+	if err := os.WriteFile("VERSION", []byte("v0.0.8\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+
+	errs, _, _, err := New().ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("ValidateWithData returned internal error: %v", err)
+	}
+	if len(errs) == 0 {
+		t.Fatal("expected validation errors")
+	}
+	joined := strings.Join(errs, "\n")
+	if !strings.Contains(joined, `VERSION "v0.0.8" does not match expected "v0.0.7"`) {
+		t.Fatalf("expected VERSION mismatch, got %s", joined)
+	}
+}
+
 func TestValidateWithDataChecksumMismatchFails(t *testing.T) {
-	dist := t.TempDir()
+	root := t.TempDir()
+	t.Chdir(root)
+	dist := filepath.Join(root, "dist")
 	t.Setenv(envDistDir, dist)
 
 	plan := buildTestPlan(t, "v0.0.7")
@@ -324,7 +388,13 @@ func buildTestPlan(t *testing.T, version string) *schema.ReleasePlanEnvelope {
 
 func writeReleaseFixture(t *testing.T, dist, version string, corruptChecksum bool) {
 	t.Helper()
+	if err := os.MkdirAll(dist, 0o755); err != nil {
+		t.Fatalf("mkdir dist: %v", err)
+	}
 	p := buildPlanPayload(version)
+	if err := os.WriteFile(p.VersionFile, []byte(version+"\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
 	var artifacts []goreleaserArtifact
 	checksumLines := []string{}
 

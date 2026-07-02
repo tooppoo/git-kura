@@ -41,6 +41,7 @@ type planPayload struct {
 	SBOMAssets                    []sbomAsset       `json:"sbomAssets"`
 	ToolsArchive                  string            `json:"toolsArchive"`
 	ToolsSidecar                  string            `json:"toolsSidecar"`
+	VersionFile                   string            `json:"versionFile"`
 	PackageManagerWindowsArchives []windowsArchive  `json:"packageManagerWindowsArchives"`
 }
 
@@ -147,6 +148,7 @@ func (h *Handler) ValidateWithData(plan *schema.ReleasePlanEnvelope) ([]string, 
 		return nil, nil, nil, err
 	}
 	artifacts = augmentToolsArtifacts(artifacts, p.ToolsArchive, p.ToolsSidecar)
+	artifacts = augmentVersionFileArtifact(artifacts, p.VersionFile)
 	byName := map[string]goreleaserArtifact{}
 	for _, a := range artifacts {
 		if a.Name != "" {
@@ -194,6 +196,10 @@ func (h *Handler) ValidateWithData(plan *schema.ReleasePlanEnvelope) ([]string, 
 	toolsArchive, toolsSidecar, toolsErrs := validateTools(p.ToolsArchive, p.ToolsSidecar, goreleaserVersion(plan.Payload.TargetVersion), byName, distDir)
 	errs = append(errs, toolsErrs...)
 	results = append(results, toolsArchive, toolsSidecar)
+
+	versionResult, versionErrs := validateVersionFile(p.VersionFile, plan.Payload.TargetVersion, byName, distDir)
+	errs = append(errs, versionErrs...)
+	results = append(results, versionResult)
 
 	uploadErrs := validateUploadSet(uploadArtifacts, results)
 	errs = append(errs, uploadErrs...)
@@ -253,6 +259,7 @@ func buildPlanPayload(version string) planPayload {
 		SBOMAssets:       sboms,
 		ToolsArchive:     fmt.Sprintf("git-kura-tools_%s.tar.gz", ver),
 		ToolsSidecar:     fmt.Sprintf("git-kura-tools_%s.json", ver),
+		VersionFile:      "VERSION",
 		PackageManagerWindowsArchives: []windowsArchive{
 			{Arch: "amd64", Filename: archiveFilename(version, "windows", "amd64", "zip")},
 			{Arch: "arm64", Filename: archiveFilename(version, "windows", "arm64", "zip")},
@@ -310,6 +317,25 @@ func augmentToolsArtifacts(artifacts []goreleaserArtifact, archiveName, sidecarN
 	return artifacts
 }
 
+func augmentVersionFileArtifact(artifacts []goreleaserArtifact, versionFile string) []goreleaserArtifact {
+	if versionFile == "" {
+		return artifacts
+	}
+	for _, a := range artifacts {
+		if a.Name == versionFile {
+			return artifacts
+		}
+	}
+	if _, err := os.Stat(versionFile); err == nil {
+		artifacts = append(artifacts, goreleaserArtifact{
+			Name: versionFile,
+			Path: versionFile,
+			Type: "File",
+		})
+	}
+	return artifacts
+}
+
 func unmarshalJSONInput(envName, fallbackPath string, v any) error {
 	raw := os.Getenv(envName)
 	var b []byte
@@ -346,6 +372,8 @@ func selectUploadArtifacts(artifacts []goreleaserArtifact) []goreleaserArtifact 
 		case matchToolsArchive(a.Name):
 			out = append(out, a)
 		case matchToolsSidecar(a.Name):
+			out = append(out, a)
+		case a.Name == "VERSION":
 			out = append(out, a)
 		}
 	}
@@ -622,6 +650,37 @@ func validateTools(archiveName, sidecarName, expectedVersion string, byName map[
 		sidecarResult.Error = "tools sidecar validation failed"
 	}
 	return archiveResult, sidecarResult, errs
+}
+
+func validateVersionFile(name, expectedVersion string, byName map[string]goreleaserArtifact, distDir string) (assetResult, []string) {
+	a, ok := byName[name]
+	if !ok {
+		r := assetResult{AssetKind: "version-file", Filename: name, Status: statusFail, Error: "not found in GoReleaser artifacts output"}
+		return r, []string{formatResultError(r)}
+	}
+	r := assetResult{AssetKind: "version-file", Filename: name, Path: a.Path}
+	path := a.Path
+	if filepath.IsAbs(path) || filepath.Base(path) != path || strings.HasPrefix(filepath.ToSlash(path), filepath.ToSlash(distDir)+"/") {
+		path = resolveArtifactPath(path, distDir)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		r.Status = statusFail
+		r.Error = err.Error()
+		return r, []string{formatResultError(r)}
+	}
+	actual := strings.TrimSpace(string(b))
+	r.Checks = map[string]string{"versionCheck": statusOK}
+	if actual != expectedVersion {
+		r.Status = statusFail
+		r.Checks["versionCheck"] = statusFail
+		r.Error = "version validation failed"
+		r.Expected = expectedVersion
+		r.Actual = actual
+		return r, []string{fmt.Sprintf("VERSION %q does not match expected %q", actual, expectedVersion)}
+	}
+	r.Status = statusOK
+	return r, nil
 }
 
 func validateUploadSet(uploadArtifacts []goreleaserArtifact, results []assetResult) []string {

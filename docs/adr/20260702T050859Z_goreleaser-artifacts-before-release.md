@@ -1,6 +1,6 @@
 # Validate GoReleaser Artifacts Before GitHub Release Creation
 
-- Status: Accepted
+- Status: Superseded by [20260702T141159Z_include-version-release-asset.md](20260702T141159Z_include-version-release-asset.md)
 - Created: 2026-07-02T05:08:59Z
 
 ## Context
