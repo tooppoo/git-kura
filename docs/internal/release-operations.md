@@ -2,7 +2,7 @@
 
 This document describes the maintainer-facing release support workflow for git-kura release steps that are implemented outside the shipped `git kura` CLI. The release support entry point is `go run ./scripts/release ...`.
 
-This document covers the implemented `tag` step, plus the optional `release-asset` validate-only step that can be run to cross-check GitHub Release assets before package-manager workflows. Homebrew tap and Scoop bucket updates are no longer git-kura release steps; they are handled by their package-manager repositories' own workflows (see the package-manager repository update sections below).
+This document covers the implemented `tag` step, plus the `release-asset` validate-only step used by the release workflow to verify GoReleaser-generated local artifacts before GitHub Release creation. Homebrew tap and Scoop bucket updates are no longer git-kura release steps; they are handled by their package-manager repositories' own workflows (see the package-manager repository update sections below).
 
 ## Command model
 
@@ -24,12 +24,11 @@ Each plan has a `planId` and a `payloadHash`. The validate result records both. 
 
 ## Recommended order
 
-Run the implemented release operations in this order:
+Run the maintainer-facing release operation in this order:
 
 1. `tag`
-2. `release-asset` validate
 
-The `tag` step creates and pushes the release tag. The release workflow attached to that tag publishes the GitHub Release assets. The `release-asset` step can then be used to verify those assets before running external package-manager repository workflows. Homebrew tap and Scoop bucket updates run separately in their own repositories and are not part of this sequence.
+The `tag` step creates and pushes the release tag. The release workflow attached to that tag runs GoReleaser with `release --clean --skip=publish`, validates the generated `dist` artifacts with the `release-asset` step, and only then creates the GitHub Release with `softprops/action-gh-release`. Homebrew tap and Scoop bucket updates run separately in their own repositories and are not part of this sequence.
 
 ## Tag step
 
@@ -54,16 +53,16 @@ If the local tag exists but the remote tag does not, delete the local tag only a
 
 ## Release-Asset Validate Step
 
-`release-asset` is validate-only. It has no external side effects and `exec` is intentionally not part of the workflow.
+`release-asset` is validate-only. It has no external side effects and `exec` is intentionally not part of the workflow. In the release workflow, this step reads GoReleaser action `metadata` and `artifacts` output plus the generated files under `dist`.
 
 ```sh
 go run ./scripts/release plan --version v0.0.7 --step release-asset
 go run ./scripts/release validate --version v0.0.7 --step release-asset
 ```
 
-Validation checks the GitHub Release for the expected platform archives, `checksums.txt`, `checksums.txt.sigstore.json`, SBOM files, tools archive, tools sidecar manifest, and the package-manager platform archives used by external consumers. Windows amd64 and arm64 archive URLs and checksum entries are recorded as package-manager asset data so the external Scoop bucket repository workflow can reference the release asset URL and checksum with architecture granularity.
+Validation checks the expected platform archives, `checksums.txt`, `checksums.txt.sigstore.json`, SBOM files, tools archive, tools sidecar manifest, and the package-manager platform archives used by external consumers. It parses the GoReleaser `artifacts` output, promotes the two expected tools files from `.tools-dist` when `--skip=publish` leaves `release.extra_files` out of `artifacts.json`, applies the upload allowlist, validates the selected local files, and writes the same newline-delimited file list to the GitHub Actions `files` step output for `softprops/action-gh-release`.
 
-Because this step reads GitHub Release metadata, run it after the tag-triggered release workflow has completed and the release assets are visible.
+When running this step outside GitHub Actions, set `GIT_KURA_GORELEASER_METADATA` and `GIT_KURA_GORELEASER_ARTIFACTS` to the corresponding GoReleaser action JSON outputs, or leave them unset and provide `dist/metadata.json` and `dist/artifacts.json`. `GIT_KURA_DIST_DIR` may be set when the GoReleaser dist directory is not `dist`; `GIT_KURA_TOOLS_DIST_DIR` may be set when the tools before-hook output directory is not `.tools-dist`.
 
 ## Scoop bucket update
 

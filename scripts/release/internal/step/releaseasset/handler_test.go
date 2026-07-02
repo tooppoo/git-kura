@@ -1,14 +1,20 @@
 package releaseasset
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-)
 
-// --- isSHA256Hex -------------------------------------------------------------
+	"github.com/tooppoo/git-kura/scripts/release/internal/schema"
+)
 
 func TestIsSHA256Hex(t *testing.T) {
 	cases := []struct {
@@ -18,11 +24,11 @@ func TestIsSHA256Hex(t *testing.T) {
 		{strings.Repeat("a", 64), true},
 		{strings.Repeat("f", 64), true},
 		{"0123456789abcdef" + strings.Repeat("a", 48), true},
-		{strings.Repeat("A", 64), false}, // uppercase rejected
-		{strings.Repeat("a", 63), false}, // too short
-		{strings.Repeat("a", 65), false}, // too long
+		{strings.Repeat("A", 64), false},
+		{strings.Repeat("a", 63), false},
+		{strings.Repeat("a", 65), false},
 		{"", false},
-		{strings.Repeat("g", 64), false}, // 'g' is not hex
+		{strings.Repeat("g", 64), false},
 	}
 	for _, tc := range cases {
 		got := isSHA256Hex(tc.s)
@@ -32,8 +38,6 @@ func TestIsSHA256Hex(t *testing.T) {
 	}
 }
 
-// --- hasChecksumEntry --------------------------------------------------------
-
 func TestHasChecksumEntry(t *testing.T) {
 	validHash := strings.Repeat("a", 64)
 	cases := []struct {
@@ -42,60 +46,15 @@ func TestHasChecksumEntry(t *testing.T) {
 		filename string
 		want     bool
 	}{
-		{
-			name:     "exact match with valid sha256",
-			content:  validHash + "  somefile.tar.gz",
-			filename: "somefile.tar.gz",
-			want:     true,
-		},
-		{
-			name:     "filename mismatch",
-			content:  validHash + "  other.tar.gz",
-			filename: "somefile.tar.gz",
-			want:     false,
-		},
-		{
-			name:     "hash too short — rejected even with correct filename",
-			content:  "deadbeef  somefile.tar.gz",
-			filename: "somefile.tar.gz",
-			want:     false,
-		},
-		{
-			name:     "uppercase hash — rejected (GoReleaser outputs lowercase)",
-			content:  strings.Repeat("A", 64) + "  somefile.tar.gz",
-			filename: "somefile.tar.gz",
-			want:     false,
-		},
-		{
-			name:     "non-hex character in hash",
-			content:  strings.Repeat("g", 64) + "  somefile.tar.gz",
-			filename: "somefile.tar.gz",
-			want:     false,
-		},
-		{
-			name:     "match in multiline content",
-			content:  validHash + "  other.tar.gz\n" + validHash + "  target.zip",
-			filename: "target.zip",
-			want:     true,
-		},
-		{
-			name:     "empty content",
-			content:  "",
-			filename: "somefile.tar.gz",
-			want:     false,
-		},
-		{
-			name:     "three fields — not a valid entry",
-			content:  validHash + "  extra  somefile.tar.gz",
-			filename: "somefile.tar.gz",
-			want:     false,
-		},
-		{
-			name:     "only one field — no filename",
-			content:  validHash,
-			filename: "somefile.tar.gz",
-			want:     false,
-		},
+		{"exact match with valid sha256", validHash + "  somefile.tar.gz", "somefile.tar.gz", true},
+		{"filename mismatch", validHash + "  other.tar.gz", "somefile.tar.gz", false},
+		{"hash too short", "deadbeef  somefile.tar.gz", "somefile.tar.gz", false},
+		{"uppercase hash", strings.Repeat("A", 64) + "  somefile.tar.gz", "somefile.tar.gz", false},
+		{"non-hex character", strings.Repeat("g", 64) + "  somefile.tar.gz", "somefile.tar.gz", false},
+		{"match in multiline content", validHash + "  other.tar.gz\n" + validHash + "  target.zip", "target.zip", true},
+		{"empty content", "", "somefile.tar.gz", false},
+		{"three fields", validHash + "  extra  somefile.tar.gz", "somefile.tar.gz", false},
+		{"only one field", validHash, "somefile.tar.gz", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -107,78 +66,69 @@ func TestHasChecksumEntry(t *testing.T) {
 	}
 }
 
-// --- checkAssetExists --------------------------------------------------------
-
-func TestCheckAssetExists(t *testing.T) {
-	assetMap := map[string]githubAsset{
-		"found.tar.gz": {
-			Name:               "found.tar.gz",
-			State:              "uploaded",
-			BrowserDownloadURL: "https://example.com/found.tar.gz",
-		},
-		"not-uploaded.tar.gz": {
-			Name:               "not-uploaded.tar.gz",
-			State:              "open",
-			BrowserDownloadURL: "https://example.com/not-uploaded.tar.gz",
-		},
-		"no-url.tar.gz": {
-			Name:  "no-url.tar.gz",
-			State: "uploaded",
-		},
+func TestValidateArchiveEntryPathRejectsTraversalAndWindowsPaths(t *testing.T) {
+	cases := []struct {
+		name    string
+		wantErr bool
+	}{
+		{"git-kura/README.md", false},
+		{"git-kura\\README.md", false},
+		{"../README.md", true},
+		{"git-kura/../README.md", true},
+		{"..\\README.md", true},
+		{"git-kura\\..\\README.md", true},
+		{"/tmp/git-kura", true},
+		{"C:/tmp/git-kura", true},
+		{"C:\\tmp\\git-kura", true},
+		{"//server/share/git-kura", true},
+		{"\\\\server\\share\\git-kura", true},
+		{"", true},
+		{".", true},
 	}
-
-	t.Run("not found", func(t *testing.T) {
-		r := checkAssetExists(assetMap, "missing.tar.gz", "platform-archive")
-		if r.Status != statusFail {
-			t.Errorf("want failure, got %s", r.Status)
-		}
-	})
-	t.Run("state not uploaded", func(t *testing.T) {
-		r := checkAssetExists(assetMap, "not-uploaded.tar.gz", "platform-archive")
-		if r.Status != statusFail {
-			t.Errorf("want failure for state!=uploaded, got %s (error: %s)", r.Status, r.Error)
-		}
-		if r.BrowserDownloadURL != "" {
-			t.Errorf("want no URL on metadata failure, got %s", r.BrowserDownloadURL)
-		}
-	})
-	t.Run("empty browser_download_url", func(t *testing.T) {
-		r := checkAssetExists(assetMap, "no-url.tar.gz", "platform-archive")
-		if r.Status != statusFail {
-			t.Errorf("want failure for empty URL, got %s (error: %s)", r.Status, r.Error)
-		}
-	})
-	t.Run("success", func(t *testing.T) {
-		r := checkAssetExists(assetMap, "found.tar.gz", "platform-archive")
-		if r.Status != statusOK {
-			t.Errorf("want success, got %s (error: %s)", r.Status, r.Error)
-		}
-		if r.BrowserDownloadURL == "" {
-			t.Error("want non-empty BrowserDownloadURL on success")
-		}
-		if r.AssetKind != "platform-archive" {
-			t.Errorf("want kind=platform-archive, got %s", r.AssetKind)
-		}
-	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateArchiveEntryPath(tc.name)
+			if tc.wantErr && err == nil {
+				t.Fatal("want error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
 }
 
-// --- goreleaerVersion --------------------------------------------------------
+func TestResultLogLineIncludesSortedChecks(t *testing.T) {
+	got := resultLogLine(assetResult{
+		AssetKind: "platform-archive",
+		Filename:  "archive.tar.gz",
+		Status:    statusFail,
+		Error:     "archive content validation failed",
+		Checks: map[string]string{
+			"readmeCheck":  statusFail,
+			"binaryCheck":  statusOK,
+			"licenseCheck": statusOK,
+		},
+	})
+	want := "release-asset kind=platform-archive name=archive.tar.gz path= status=failure reason=archive content validation failed checks=binaryCheck:success,licenseCheck:success,readmeCheck:failure"
+	if got != want {
+		t.Fatalf("resultLogLine() = %q, want %q", got, want)
+	}
+}
 
-func TestGoreleaerVersion(t *testing.T) {
+func TestGoreleaserVersion(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"v0.0.7", "0.0.7"},
 		{"v1.2.3", "1.2.3"},
-		{"0.0.7", "0.0.7"}, // no-op when already stripped
+		{"0.0.7", "0.0.7"},
 	}
 	for _, tc := range cases {
-		got := goreleaerVersion(tc.in)
+		got := goreleaserVersion(tc.in)
 		if got != tc.want {
-			t.Errorf("goreleaerVersion(%q) = %q, want %q", tc.in, got, tc.want)
+			t.Errorf("goreleaserVersion(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
-
-// --- archiveFilename ---------------------------------------------------------
 
 func TestArchiveFilename(t *testing.T) {
 	cases := []struct {
@@ -194,13 +144,10 @@ func TestArchiveFilename(t *testing.T) {
 	for _, tc := range cases {
 		got := archiveFilename(tc.version, tc.goos, tc.goarch, tc.ext)
 		if got != tc.want {
-			t.Errorf("archiveFilename(%q,%q,%q,%q) = %q, want %q",
-				tc.version, tc.goos, tc.goarch, tc.ext, got, tc.want)
+			t.Errorf("archiveFilename(%q,%q,%q,%q) = %q, want %q", tc.version, tc.goos, tc.goarch, tc.ext, got, tc.want)
 		}
 	}
 }
-
-// --- buildPlanPayload --------------------------------------------------------
 
 func TestBuildPlanPayload(t *testing.T) {
 	version := "v0.0.7"
@@ -221,255 +168,365 @@ func TestBuildPlanPayload(t *testing.T) {
 	if p.SignatureFile != "checksums.txt.sigstore.json" {
 		t.Errorf("signatureFile = %q, want checksums.txt.sigstore.json", p.SignatureFile)
 	}
-	// Tools archive and sidecar use the goreleaser version (no v prefix).
 	if p.ToolsArchive != "git-kura-tools_0.0.7.tar.gz" {
 		t.Errorf("toolsArchive = %q, want git-kura-tools_0.0.7.tar.gz", p.ToolsArchive)
 	}
 	if p.ToolsSidecar != "git-kura-tools_0.0.7.json" {
 		t.Errorf("toolsSidecar = %q, want git-kura-tools_0.0.7.json", p.ToolsSidecar)
 	}
-	// SBOM names must follow the convention <archive>.sbom.json.
 	for _, sa := range p.SBOMAssets {
 		want := sa.ArchiveFilename + ".sbom.json"
 		if sa.SBOMFilename != want {
 			t.Errorf("SBOM for %q: got %q, want %q", sa.ArchiveFilename, sa.SBOMFilename, want)
 		}
 	}
-	// Windows package-manager archives must be a subset of platform archives.
-	winFiles := map[string]bool{}
+}
+
+func TestSelectUploadArtifactsUsesAllowlist(t *testing.T) {
+	artifacts := []goreleaserArtifact{
+		{Name: "binary", Path: "dist/binary", Type: "Binary"},
+		{Name: "metadata.json", Path: "dist/metadata.json", Type: "Metadata"},
+		{Name: "git-kura_v0.0.7_Linux_x86_64.tar.gz", Path: "dist/git-kura_v0.0.7_Linux_x86_64.tar.gz", Type: "Archive", Extra: extraID("release-archives")},
+		{Name: "checksums.txt", Path: "dist/checksums.txt", Type: "Checksum"},
+		{Name: "checksums.txt.sigstore.json", Path: "dist/checksums.txt.sigstore.json", Type: "Signature"},
+		{Name: "git-kura_v0.0.7_Linux_x86_64.tar.gz.sbom.json", Path: "dist/git-kura_v0.0.7_Linux_x86_64.tar.gz.sbom.json", Type: "SBOM"},
+		{Name: "git-kura-tools_0.0.7.tar.gz", Path: "dist/git-kura-tools_0.0.7.tar.gz", Type: "File"},
+		{Name: "git-kura-tools_0.0.7.json", Path: "dist/git-kura-tools_0.0.7.json", Type: "File"},
+		{Name: "unrelated.txt", Path: "dist/unrelated.txt", Type: "File"},
+	}
+	got := selectUploadArtifacts(artifacts)
+	names := make(map[string]bool)
+	for _, a := range got {
+		names[a.Name] = true
+	}
+	for _, name := range []string{"binary", "metadata.json", "unrelated.txt"} {
+		if names[name] {
+			t.Errorf("%s should not be upload-selected", name)
+		}
+	}
+	for _, name := range []string{
+		"git-kura_v0.0.7_Linux_x86_64.tar.gz",
+		"checksums.txt",
+		"checksums.txt.sigstore.json",
+		"git-kura_v0.0.7_Linux_x86_64.tar.gz.sbom.json",
+		"git-kura-tools_0.0.7.tar.gz",
+		"git-kura-tools_0.0.7.json",
+	} {
+		if !names[name] {
+			t.Errorf("%s should be upload-selected", name)
+		}
+	}
+}
+
+func TestValidateWithDataLocalArtifactsSuccess(t *testing.T) {
+	dist := t.TempDir()
+	output := filepath.Join(t.TempDir(), "github-output")
+	t.Setenv(envDistDir, dist)
+	t.Setenv("GITHUB_OUTPUT", output)
+
+	plan := buildTestPlan(t, "v0.0.7")
+	writeReleaseFixture(t, dist, "v0.0.7", false)
+
+	errs, warnings, stepData, err := New().ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("ValidateWithData returned internal error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("errs = %v, want none", errs)
+	}
+	var data validateStepData
+	if err := json.Unmarshal(stepData, &data); err != nil {
+		t.Fatalf("parse stepData: %v", err)
+	}
+	if len(data.UploadFiles) != 16 {
+		t.Fatalf("uploadFiles length = %d, want 16", len(data.UploadFiles))
+	}
+	b, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("read GITHUB_OUTPUT: %v", err)
+	}
+	if !strings.Contains(string(b), "files<<EOF\n") {
+		t.Fatalf("GITHUB_OUTPUT missing files heredoc: %s", string(b))
+	}
+	if strings.Contains(string(b), "metadata.json") {
+		t.Fatalf("GITHUB_OUTPUT includes local-only metadata: %s", string(b))
+	}
+}
+
+func TestValidateWithDataAddsToolsFromToolsDistWhenMissingFromArtifactsOutput(t *testing.T) {
+	dist := t.TempDir()
+	toolsDist := filepath.Join(t.TempDir(), "tools-dist")
+	t.Setenv(envDistDir, dist)
+	t.Setenv(envToolsDistDir, toolsDist)
+
+	plan := buildTestPlan(t, "v0.0.7")
+	writeReleaseFixture(t, dist, "v0.0.7", false)
+	moveToolsOutOfArtifactsJSON(t, dist, toolsDist, "v0.0.7")
+
+	errs, _, stepData, err := New().ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("ValidateWithData returned internal error: %v", err)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("errs = %v, want none", errs)
+	}
+	var data validateStepData
+	if err := json.Unmarshal(stepData, &data); err != nil {
+		t.Fatalf("parse stepData: %v", err)
+	}
+	for _, want := range []string{
+		filepath.Join(toolsDist, "git-kura-tools_0.0.7.tar.gz"),
+		filepath.Join(toolsDist, "git-kura-tools_0.0.7.json"),
+	} {
+		if !containsString(data.UploadFiles, want) {
+			t.Fatalf("uploadFiles missing %s: %v", want, data.UploadFiles)
+		}
+	}
+}
+
+func TestValidateWithDataChecksumMismatchFails(t *testing.T) {
+	dist := t.TempDir()
+	t.Setenv(envDistDir, dist)
+
+	plan := buildTestPlan(t, "v0.0.7")
+	writeReleaseFixture(t, dist, "v0.0.7", true)
+
+	errs, _, _, err := New().ValidateWithData(plan)
+	if err != nil {
+		t.Fatalf("ValidateWithData returned internal error: %v", err)
+	}
+	if len(errs) == 0 {
+		t.Fatal("expected validation errors")
+	}
+	joined := strings.Join(errs, "\n")
+	if !strings.Contains(joined, "checksum mismatch") {
+		t.Fatalf("expected checksum mismatch, got %s", joined)
+	}
+}
+
+func buildTestPlan(t *testing.T, version string) *schema.ReleasePlanEnvelope {
+	t.Helper()
+	payload, err := New().BuildPayload(version)
+	if err != nil {
+		t.Fatalf("BuildPayload: %v", err)
+	}
+	return &schema.ReleasePlanEnvelope{
+		Payload: schema.ReleasePlanPayload{
+			TargetVersion: version,
+			StepName:      "release-asset",
+			StepData:      payload,
+		},
+	}
+}
+
+func writeReleaseFixture(t *testing.T, dist, version string, corruptChecksum bool) {
+	t.Helper()
+	p := buildPlanPayload(version)
+	var artifacts []goreleaserArtifact
+	checksumLines := []string{}
+
 	for _, pa := range p.PlatformArchives {
+		path := filepath.Join(dist, pa.Filename)
 		if pa.OS == "windows" {
-			winFiles[pa.Filename] = true
+			writeZip(t, path)
+		} else {
+			writeTarGz(t, path)
 		}
-	}
-	for _, wa := range p.PackageManagerWindowsArchives {
-		if !winFiles[wa.Filename] {
-			t.Errorf("package-manager archive %q not in platform archives", wa.Filename)
+		sum := mustSHA256File(t, path)
+		if corruptChecksum && pa.OS == "linux" && pa.Arch == "amd64" {
+			sum = strings.Repeat("0", 64)
 		}
-	}
-}
-
-// --- splitOwnerRepo ----------------------------------------------------------
-
-func TestSplitOwnerRepo(t *testing.T) {
-	cases := []struct {
-		in        string
-		wantOwner string
-		wantRepo  string
-		wantErr   bool
-	}{
-		{"tooppoo/git-kura", "tooppoo", "git-kura", false},
-		{"owner/repo-name", "owner", "repo-name", false},
-		{"/git-kura", "", "", true}, // empty owner
-		{"tooppoo/", "", "", true},  // empty repo
-		{"tooppoo", "", "", true},   // missing slash
-	}
-	for _, tc := range cases {
-		owner, repo, err := splitOwnerRepo(tc.in)
-		if tc.wantErr {
-			if err == nil {
-				t.Errorf("splitOwnerRepo(%q): want error, got nil (owner=%q repo=%q)", tc.in, owner, repo)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("splitOwnerRepo(%q): unexpected error: %v", tc.in, err)
-			continue
-		}
-		if owner != tc.wantOwner || repo != tc.wantRepo {
-			t.Errorf("splitOwnerRepo(%q) = (%q, %q), want (%q, %q)",
-				tc.in, owner, repo, tc.wantOwner, tc.wantRepo)
-		}
-	}
-}
-
-// --- downloadText ------------------------------------------------------------
-
-func TestDownloadText(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte("hello world"))
-		}))
-		defer srv.Close()
-
-		got, err := downloadText(srv.URL)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != "hello world" {
-			t.Errorf("got %q, want %q", got, "hello world")
-		}
-	})
-	t.Run("non-200 status", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusNotFound)
-		}))
-		defer srv.Close()
-
-		_, err := downloadText(srv.URL)
-		if err == nil {
-			t.Fatal("want error for non-200 status, got nil")
-		}
-	})
-}
-
-// --- validateToolsSidecar ----------------------------------------------------
-
-func TestValidateToolsSidecar(t *testing.T) {
-	manifest := func(version, archiveName, checksum, algo string) []byte {
-		b, _ := json.Marshal(toolsSidecarManifest{
-			Version:           version,
-			ArchiveName:       archiveName,
-			ArchiveChecksum:   checksum,
-			ChecksumAlgorithm: algo,
+		checksumLines = append(checksumLines, sum+"  "+pa.Filename)
+		artifacts = append(artifacts, goreleaserArtifact{
+			Name:   pa.Filename,
+			Path:   path,
+			Goos:   pa.OS,
+			Goarch: pa.Arch,
+			Type:   "Archive",
+			Extra:  extraID("release-archives"),
 		})
-		return b
+		sbomPath := filepath.Join(dist, pa.Filename+".sbom.json")
+		if err := os.WriteFile(sbomPath, []byte(`{"bomFormat":"CycloneDX"}`), 0o644); err != nil {
+			t.Fatalf("write sbom: %v", err)
+		}
+		artifacts = append(artifacts, goreleaserArtifact{
+			Name: pa.Filename + ".sbom.json",
+			Path: sbomPath,
+			Type: "SBOM",
+		})
 	}
 
-	const (
-		wantVersion   = "0.0.7"
-		wantArchive   = "git-kura-tools_0.0.7.tar.gz"
-		sidecarName   = "git-kura-tools_0.0.7.json"
-		validChecksum = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" // SHA256(""), 64 hex chars
+	checksumPath := filepath.Join(dist, p.ChecksumFile)
+	if err := os.WriteFile(checksumPath, []byte(strings.Join(checksumLines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write checksums: %v", err)
+	}
+	artifacts = append(artifacts, goreleaserArtifact{Name: p.ChecksumFile, Path: checksumPath, Type: "Checksum"})
+
+	signaturePath := filepath.Join(dist, p.SignatureFile)
+	if err := os.WriteFile(signaturePath, []byte(`{"mediaType":"application/vnd.dev.sigstore.bundle"}`), 0o644); err != nil {
+		t.Fatalf("write signature: %v", err)
+	}
+	artifacts = append(artifacts, goreleaserArtifact{Name: p.SignatureFile, Path: signaturePath, Type: "Signature"})
+
+	toolsPath := filepath.Join(dist, p.ToolsArchive)
+	if err := os.WriteFile(toolsPath, []byte("tools archive"), 0o644); err != nil {
+		t.Fatalf("write tools archive: %v", err)
+	}
+	toolsSum := mustSHA256File(t, toolsPath)
+	sidecarPath := filepath.Join(dist, p.ToolsSidecar)
+	sidecar := toolsSidecarManifest{
+		ArchiveName:       p.ToolsArchive,
+		ArchiveChecksum:   toolsSum,
+		ChecksumAlgorithm: "sha256",
+		Version:           goreleaserVersion(version),
+	}
+	sidecarJSON, err := json.Marshal(sidecar)
+	if err != nil {
+		t.Fatalf("marshal sidecar: %v", err)
+	}
+	if err := os.WriteFile(sidecarPath, sidecarJSON, 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+	artifacts = append(artifacts,
+		goreleaserArtifact{Name: p.ToolsArchive, Path: toolsPath, Type: "File"},
+		goreleaserArtifact{Name: p.ToolsSidecar, Path: sidecarPath, Type: "File"},
+		goreleaserArtifact{Name: "metadata.json", Path: filepath.Join(dist, "metadata.json"), Type: "Metadata"},
+		goreleaserArtifact{Name: "git-kura", Path: filepath.Join(dist, "git-kura"), Type: "Binary"},
 	)
 
-	t.Run("all fields valid", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write(manifest(wantVersion, wantArchive, validChecksum, "sha256"))
-		}))
-		defer srv.Close()
+	metadataPath := filepath.Join(dist, "metadata.json")
+	metadata, err := json.Marshal(goreleaserMetadata{Tag: version, Version: goreleaserVersion(version), Commit: "abc123"})
+	if err != nil {
+		t.Fatalf("marshal metadata: %v", err)
+	}
+	if err := os.WriteFile(metadataPath, metadata, 0o644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	artifactsJSON, err := json.Marshal(artifacts)
+	if err != nil {
+		t.Fatalf("marshal artifacts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dist, "artifacts.json"), artifactsJSON, 0o644); err != nil {
+		t.Fatalf("write artifacts: %v", err)
+	}
+}
 
-		r, errs := validateToolsSidecar(srv.URL, sidecarName, wantArchive, wantVersion)
-		if r.Status != statusOK {
-			t.Errorf("want success, got %s (checks: %v, errs: %v)", r.Status, r.Checks, errs)
+func moveToolsOutOfArtifactsJSON(t *testing.T, dist, toolsDist, version string) {
+	t.Helper()
+	if err := os.MkdirAll(toolsDist, 0o755); err != nil {
+		t.Fatalf("mkdir tools dist: %v", err)
+	}
+	p := buildPlanPayload(version)
+	for _, name := range []string{p.ToolsArchive, p.ToolsSidecar} {
+		if err := os.Rename(filepath.Join(dist, name), filepath.Join(toolsDist, name)); err != nil {
+			t.Fatalf("move tool artifact %s: %v", name, err)
 		}
-		if len(errs) != 0 {
-			t.Errorf("want no errors, got %v", errs)
+	}
+	var artifacts []goreleaserArtifact
+	b, err := os.ReadFile(filepath.Join(dist, "artifacts.json"))
+	if err != nil {
+		t.Fatalf("read artifacts: %v", err)
+	}
+	if err := json.Unmarshal(b, &artifacts); err != nil {
+		t.Fatalf("parse artifacts: %v", err)
+	}
+	filtered := artifacts[:0]
+	for _, a := range artifacts {
+		if a.Name != p.ToolsArchive && a.Name != p.ToolsSidecar {
+			filtered = append(filtered, a)
 		}
-		for k, v := range r.Checks {
-			if v != statusOK {
-				t.Errorf("check %q = %q, want %q", k, v, statusOK)
-			}
-		}
-	})
+	}
+	out, err := json.Marshal(filtered)
+	if err != nil {
+		t.Fatalf("marshal filtered artifacts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dist, "artifacts.json"), out, 0o644); err != nil {
+		t.Fatalf("write filtered artifacts: %v", err)
+	}
+}
 
-	t.Run("version mismatch", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write(manifest("0.0.6", wantArchive, validChecksum, "sha256"))
-		}))
-		defer srv.Close()
+func writeTarGz(t *testing.T, path string) {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for name, content := range map[string]string{
+		"git-kura/git-kura":                          "binary",
+		"git-kura/README.md":                         "readme",
+		"git-kura/LICENSE":                           "license",
+		"git-kura/third_party_licenses/licenses.txt": "third party",
+	} {
+		b := []byte(content)
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(b))}); err != nil {
+			t.Fatalf("tar header: %v", err)
+		}
+		if _, err := tw.Write(b); err != nil {
+			t.Fatalf("tar write: %v", err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("tar close: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write tar.gz: %v", err)
+	}
+}
 
-		r, errs := validateToolsSidecar(srv.URL, sidecarName, wantArchive, wantVersion)
-		if r.Status != statusFail {
-			t.Errorf("want failure for version mismatch, got %s", r.Status)
+func writeZip(t *testing.T, path string) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create zip: %v", err)
+	}
+	zw := zip.NewWriter(f)
+	for name, content := range map[string]string{
+		"git-kura/git-kura.exe":                      "binary",
+		"git-kura/README.md":                         "readme",
+		"git-kura/LICENSE":                           "license",
+		"git-kura/third_party_licenses/licenses.txt": "third party",
+	} {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("zip create entry: %v", err)
 		}
-		if r.Checks["versionCheck"] != statusFail {
-			t.Errorf("versionCheck = %q, want failure", r.Checks["versionCheck"])
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Fatalf("zip write entry: %v", err)
 		}
-		if len(errs) == 0 {
-			t.Error("want at least one error, got none")
-		}
-	})
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("zip file close: %v", err)
+	}
+}
 
-	t.Run("archiveName mismatch", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write(manifest(wantVersion, "wrong-archive.tar.gz", validChecksum, "sha256"))
-		}))
-		defer srv.Close()
+func mustSHA256File(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read for sha256: %v", err)
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
 
-		r, errs := validateToolsSidecar(srv.URL, sidecarName, wantArchive, wantVersion)
-		if r.Status != statusFail {
-			t.Errorf("want failure for archiveName mismatch, got %s", r.Status)
-		}
-		if r.Checks["archiveNameCheck"] != statusFail {
-			t.Errorf("archiveNameCheck = %q, want failure", r.Checks["archiveNameCheck"])
-		}
-		if len(errs) == 0 {
-			t.Error("want at least one error, got none")
-		}
-	})
+func extraID(id string) map[string]json.RawMessage {
+	b, _ := json.Marshal(id)
+	return map[string]json.RawMessage{"ID": b}
+}
 
-	t.Run("empty archiveChecksum", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write(manifest(wantVersion, wantArchive, "", "sha256"))
-		}))
-		defer srv.Close()
-
-		r, errs := validateToolsSidecar(srv.URL, sidecarName, wantArchive, wantVersion)
-		if r.Status != statusFail {
-			t.Errorf("want failure for empty checksum, got %s", r.Status)
+func containsString(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
 		}
-		if r.Checks["archiveChecksumCheck"] != statusFail {
-			t.Errorf("archiveChecksumCheck = %q, want failure", r.Checks["archiveChecksumCheck"])
-		}
-		if len(errs) == 0 {
-			t.Error("want at least one error, got none")
-		}
-	})
-
-	t.Run("archiveChecksum not valid sha256 hex", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write(manifest(wantVersion, wantArchive, "abc123", "sha256"))
-		}))
-		defer srv.Close()
-
-		r, errs := validateToolsSidecar(srv.URL, sidecarName, wantArchive, wantVersion)
-		if r.Status != statusFail {
-			t.Errorf("want failure for non-hex checksum, got %s", r.Status)
-		}
-		if r.Checks["archiveChecksumCheck"] != statusFail {
-			t.Errorf("archiveChecksumCheck = %q, want failure", r.Checks["archiveChecksumCheck"])
-		}
-		if len(errs) == 0 {
-			t.Error("want at least one error, got none")
-		}
-	})
-
-	t.Run("unsupported checksumAlgorithm", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write(manifest(wantVersion, wantArchive, validChecksum, "md5"))
-		}))
-		defer srv.Close()
-
-		r, errs := validateToolsSidecar(srv.URL, sidecarName, wantArchive, wantVersion)
-		if r.Status != statusFail {
-			t.Errorf("want failure for wrong algorithm, got %s", r.Status)
-		}
-		if r.Checks["checksumAlgorithmCheck"] != statusFail {
-			t.Errorf("checksumAlgorithmCheck = %q, want failure", r.Checks["checksumAlgorithmCheck"])
-		}
-		if len(errs) == 0 {
-			t.Error("want at least one error, got none")
-		}
-	})
-
-	t.Run("download failure", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusInternalServerError)
-		}))
-		defer srv.Close()
-
-		r, errs := validateToolsSidecar(srv.URL, sidecarName, wantArchive, wantVersion)
-		if r.Status != statusFail {
-			t.Errorf("want failure for download error, got %s", r.Status)
-		}
-		if len(errs) == 0 {
-			t.Error("want at least one error, got none")
-		}
-	})
-
-	t.Run("invalid JSON body", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte("not-json"))
-		}))
-		defer srv.Close()
-
-		r, errs := validateToolsSidecar(srv.URL, sidecarName, wantArchive, wantVersion)
-		if r.Status != statusFail {
-			t.Errorf("want failure for invalid JSON, got %s", r.Status)
-		}
-		if len(errs) == 0 {
-			t.Error("want at least one error, got none")
-		}
-	})
+	}
+	return false
 }
