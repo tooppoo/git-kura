@@ -34,15 +34,12 @@ jobs:
       - name: Save licenses
         run: just license-save
 
-      - name: create VERSION file
-        run: echo ${{ github.ref_name }} > VERSION
-
       - name: Run GoReleaser
         id: goreleaser
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version-file: .tool-versions
           args: release --skip=publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -58,11 +55,16 @@ jobs:
           go run ./scripts/release plan --version "${GITHUB_REF_NAME}" --step release-asset
           go run ./scripts/release validate --version "${GITHUB_REF_NAME}" --step release-asset
 
+      - name: create VERSION file
+        run: echo ${{ github.ref_name }} > VERSION
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
-          files: ${{ steps.validate-release-assets.outputs.files }}
+          files: |
+            ${{ steps.validate-release-assets.outputs.files }}
+            VERSION
           fail_on_unmatched_files: true
           overwrite_files: false
