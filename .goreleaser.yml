@@ -59,13 +59,3 @@ sboms:
   - id: git-kura
     artifacts: archive
     cmd: syft
-
-signs:
-  - cmd: cosign
-    signature: "${artifact}.sigstore.json"
-    args:
-      - "sign-blob"
-      - "--bundle=${signature}"
-      - "${artifact}"
-      - "--yes"
-    artifacts: checksum

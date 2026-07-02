@@ -24,12 +24,6 @@ Install to a custom directory:
 curl -fsSL https://raw.githubusercontent.com/tooppoo/git-kura/main/install.sh | sh -s -- --install-dir "$HOME/bin"
 ```
 
-Require cosign signature verification (fails if `cosign` is not installed or the signature bundle is unavailable):
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/tooppoo/git-kura/main/install.sh | sh -s -- --require-signature
-```
-
 ### PATH
 
 The installer prints a reminder if `~/.local/bin` is not on your `PATH`. Add it to your shell profile if needed:
