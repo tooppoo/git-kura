@@ -55,7 +55,7 @@ temp/
 /git-kura
 *.local.json
 third_party_licenses/
-VERSION
+VERISON
 
 # Local release operation artifacts (plan files, validate results)
 .git-kura/
