@@ -40,31 +40,6 @@ jobs:
         with:
           distribution: goreleaser
           version-file: .tool-versions
-          args: release --skip=publish
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Validate release assets
-        id: validate-release-assets
-        env:
-          GIT_KURA_GORELEASER_METADATA: ${{ steps.goreleaser.outputs.metadata }}
-          GIT_KURA_GORELEASER_ARTIFACTS: ${{ steps.goreleaser.outputs.artifacts }}
-          GIT_KURA_DIST_DIR: dist
-          GIT_KURA_TOOLS_DIST_DIR: .tools-dist
-        run: |
-          go run ./scripts/release plan --version "${GITHUB_REF_NAME}" --step release-asset
-          go run ./scripts/release validate --version "${GITHUB_REF_NAME}" --step release-asset
-
-      - name: create VERSION file
-        run: echo ${{ github.ref_name }} > VERSION
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          generate_release_notes: true
-          files: |
-            ${{ steps.validate-release-assets.outputs.files }}
-            VERSION
-          fail_on_unmatched_files: true
-          overwrite_files: false

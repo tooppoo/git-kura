@@ -5,6 +5,7 @@ project_name: git-kura
 before:
   hooks:
     - sh scripts/build-tools-archive.sh {{ .Version }} .tools-dist
+    - echo {{ .Version }} > VERSION
 
 builds:
   - id: git-kura
@@ -40,6 +41,7 @@ release:
   extra_files:
     - glob: .tools-dist/git-kura-tools_*.tar.gz
     - glob: .tools-dist/git-kura-tools_*.json
+    - glob: VERSION
 
 checksum:
   name_template: checksums.txt
@@ -67,3 +69,8 @@ signs:
       - "${artifact}"
       - "--yes"
     artifacts: checksum
+
+after:
+  hooks:
+    - go run ./scripts/release plan --version "{{ .Version }}" --step release-asset
+    - go run ./scripts/release validate --version "{{ .Version }}" --step release-asset
