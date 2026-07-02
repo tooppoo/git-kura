@@ -34,6 +34,9 @@ jobs:
       - name: Save licenses
         run: just license-save
 
+      - name: create VERSION file
+        run: echo ${{ github.ref_name }} > VERSION
+
       - name: Run GoReleaser
         id: goreleaser
         uses: goreleaser/goreleaser-action@v7

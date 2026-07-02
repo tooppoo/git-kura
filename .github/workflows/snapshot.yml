@@ -32,6 +32,9 @@ jobs:
           version-file: .tool-versions
           args: check
 
+      - name: create dummy VERSION file
+        run: echo "v0.1.3" > VERSION
+
       - name: Build snapshot artifacts
         uses: goreleaser/goreleaser-action@v7
         with:
