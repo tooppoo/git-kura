@@ -10,24 +10,23 @@ import (
 )
 
 func newValidateCommand(registry *step.Registry) *cobra.Command {
-	var version, stepName, tap string
+	var version, stepName string
 
 	c := &cobra.Command{
 		Use:   "validate",
 		Short: "Validate the release plan and write a machine-readable result file",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runValidate(registry, version, stepName, step.Options{Tap: tap})
+			return runValidate(registry, version, stepName)
 		},
 	}
 	c.Flags().StringVar(&version, "version", "", "Target version (vMAJOR.MINOR.PATCH)")
 	c.Flags().StringVar(&stepName, "step", "", stepFlagUsage())
-	c.Flags().StringVar(&tap, "tap", "", "Homebrew tap repository root path (used by --step homebrew)")
 	_ = c.MarkFlagRequired("version")
 	_ = c.MarkFlagRequired("step")
 	return c
 }
 
-func runValidate(registry *step.Registry, version, stepName string, options step.Options) error {
+func runValidate(registry *step.Registry, version, stepName string) error {
 	if err := validateVersion(version); err != nil {
 		return err
 	}
@@ -35,7 +34,6 @@ func runValidate(registry *step.Registry, version, stepName string, options step
 	if err != nil {
 		return err
 	}
-	configureHandler(h, options)
 
 	planPath := planFilePath(version, string(s))
 	var plan schema.ReleasePlanEnvelope

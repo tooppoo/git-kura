@@ -99,16 +99,16 @@ The external Scoop bucket repository workflow references the Windows platform ar
 
 These are the same files as the Windows platform archives. They are also recorded separately in the `release-asset` validate result as `package-manager-windows-archive` entries so that the external Scoop bucket repository workflow can reference them with architecture granularity.
 
-### Homebrew Formula macOS archives
+### Package manager macOS archives
 
-The Homebrew tap update step (`homebrew`) reads the macOS platform archives from the same GitHub Release. It does not require or publish any Homebrew-only release asset. The relevant files and their expected filenames are:
+The external Homebrew tap repository workflow references the macOS platform archives from the same GitHub Release. It does not require or publish any Homebrew-only release asset. The relevant files and their expected filenames are:
 
 | Architecture | Filename                                     |
 |--------------|----------------------------------------------|
 | arm64        | `git-kura_v<VERSION>_Darwin_arm64.tar.gz`   |
 | amd64        | `git-kura_v<VERSION>_Darwin_x86_64.tar.gz`  |
 
-These are the same files as the macOS platform archives listed above. For each architecture the `homebrew` step reads the archive `browser_download_url` from the GitHub Release asset list and its sha256 from `checksums.txt`, then writes both into `Formula/git-kura.rb` in the tap repository. Because both the archive URL and its checksum come from the same release, a Homebrew install verifies the exact bytes covered by that release's `checksums.txt`.
+These are the same files as the macOS platform archives listed above. For each architecture the external Homebrew tap repository workflow reads the archive `browser_download_url` from the GitHub Release asset list and its sha256 from `checksums.txt`, then writes both into `Formula/git-kura.rb` in the tap repository. Because both the archive URL and its checksum come from the same release, a Homebrew install verifies the exact bytes covered by that release's `checksums.txt`.
 
 ## Asset relationships
 
@@ -131,7 +131,7 @@ Windows platform archives (amd64 + arm64)
         Scoop bucket repository workflow
 
 macOS (Darwin) platform archives (arm64 + amd64)
-  └── referenced by browser_download_url + checksums.txt sha256 for the Homebrew update step
+  └── referenced by browser_download_url + checksums.txt sha256 for the external Homebrew tap workflow
 ```
 
 ## CI considerations

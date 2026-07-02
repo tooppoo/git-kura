@@ -49,7 +49,7 @@ func TestExec_NoSideEffects(t *testing.T) {
 
 func TestNewDefaultRegistry_ContainsAllKnownSteps(t *testing.T) {
 	r := placeholder.NewDefaultRegistry()
-	for _, s := range []step.Step{step.StepTag, step.StepReleaseAsset, step.StepHomebrew} {
+	for _, s := range []step.Step{step.StepTag, step.StepReleaseAsset} {
 		if _, err := r.Get(s); err != nil {
 			t.Errorf("registry missing handler for step %q: %v", s, err)
 		}
