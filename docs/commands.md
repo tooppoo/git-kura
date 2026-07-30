@@ -21,6 +21,7 @@ git kura get fizz --format toon # print worktree metadata as TOON for AI prompts
 git kura get fizz --toon        # alias of `--format toon`
 git kura close fizz             # remove the worktree for "fizz"
 git kura ls                     # list all open worktrees
+git kura dashboard              # open a read-only TUI overview of seal ownership
 git kura seal claim <path...>   # claim paths for the current seal key
 git kura seal unclaim <path...> # release the current seal key's claim on paths
 git kura seal test <path...>    # check paths against the current seal context
@@ -125,6 +126,34 @@ With `--json` or `--toon`, emits a [common output envelope](adr/20260617T070134Z
 ```
 
 `keys` is a sorted string array of the open worktree keys, or `[]` when none are open. `ls --json` returns key names only; for per-key details use `git kura get <key> --json`. See [`docs/adr/20260618T145556Z_ls-json-returns-key-enumeration-only.md`](adr/20260618T145556Z_ls-json-returns-key-enumeration-only.md) for the rationale.
+
+## `git kura dashboard`
+
+Open a read-only TUI that shows, in one screen, which managed worktree key claims which paths in the repository-wide seal store.
+
+```sh
+git kura dashboard
+```
+
+The dashboard groups claimed repository-relative paths under each managed worktree key. It displays the union of open worktree keys and keys holding seal claims: an open worktree with zero claims is listed with `0 claims`, and a key that still holds claims but has no open worktree is flagged as `orphaned claims` instead of being hidden.
+
+The view is read-only. The dashboard never modifies the seal store and provides no claim, unclaim, merge, close, or branch operations; run the existing CLI commands from each worktree instead. Loading and periodic reloading never take the seal store writer lock (`paths.lock`), so a running dashboard never delays `seal claim`, `seal unclaim`, or `close`.
+
+Keys:
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Select the previous / next row |
+| `←` / `→` | Collapse / expand the selected key group |
+| `/` | Filter keys and claimed paths |
+| `r` | Reload now |
+| `q`, `Ctrl-C` | Quit |
+
+The filter is a case-insensitive substring match over keys and claimed paths. A key match shows that key's group with all of its claimed paths. A path match shows the owner key with only the matched paths and auto-expands that group while the filter is active. Clearing the filter restores the expand and collapse state from before the filter was applied.
+
+The seal state is reloaded periodically and on `r`. When a reload fails after a successful load, the previous snapshot stays visible and is marked stale together with the last successful load time. When the initial load fails, the error is shown inside the TUI and `r` retries. Store integrity violations (schema validation failures, invalid or non-normalized stored paths, `duplicate-canonical-path` entries) are listed separately and are never rendered as normal claims.
+
+`dashboard` requires an interactive terminal on stdin and stdout. When either is not a terminal, the command fails with exit code 1 without emitting any escape sequence, so it cannot corrupt pipes or logs. See [`docs/adr/20260730T112611Z_add-read-only-tui-dashboard-for-seal-ownership.md`](adr/20260730T112611Z_add-read-only-tui-dashboard-for-seal-ownership.md) for the design decision.
 
 ## Keys
 

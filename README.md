@@ -119,6 +119,7 @@ git kura seal unclaim <path...>  # release paths claimed by the current worktree
 git kura seal test <path...>     # read-only conflict check for the current worktree key
 git kura seal ls [key]           # inspect claimed paths
 git kura seal doctor             # validate the seal store
+git kura dashboard               # read-only TUI overview of seal ownership per key
 ```
 
 `seal claim`, `seal unclaim`, and `seal test` derive the current key from the Kura-managed worktree they run in. They do not rely on process-local state or an environment variable, which makes them suitable for fresh shell invocations used by coding agents.

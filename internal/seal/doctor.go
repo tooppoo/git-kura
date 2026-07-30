@@ -60,7 +60,11 @@ func InspectStore(storePath string) (StoreInspection, error) {
 	if err != nil {
 		return StoreInspection{}, err
 	}
+	return InspectPathStore(store), nil
+}
 
+// InspectPathStore checks an already-read store for integrity violations.
+func InspectPathStore(store PathStore) StoreInspection {
 	rawPaths := make([]string, 0, len(store.Paths))
 	for rawPath := range store.Paths {
 		rawPaths = append(rawPaths, rawPath)
@@ -114,7 +118,7 @@ func InspectStore(storePath string) (StoreInspection, error) {
 	return StoreInspection{
 		CheckedClaims: len(rawPaths),
 		Findings:      findings,
-	}, nil
+	}
 }
 
 // DoctorStore validates the seal store at storePath.
