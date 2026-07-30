@@ -348,6 +348,9 @@ func (m *Model) collapseSelected() {
 	if r.kind == rowViolation {
 		return
 	}
+	// During a filter session the collapsed write is shadowed by
+	// filterCollapsed for display and discarded on clearFilter; it is kept so
+	// the non-session path stays uniform.
 	m.collapsed[r.key] = true
 	if m.savedCollapsed != nil {
 		m.filterCollapsed[r.key] = true
