@@ -290,6 +290,38 @@ func TestFilterAutoExpandsKeyMatchedCollapsedGroup(t *testing.T) {
 	}
 }
 
+func TestPreCollapsedGroupCanBeReCollapsedDuringFilter(t *testing.T) {
+	m := newLoadedModel(t, testSnapshot())
+
+	// Collapse alpha before the filter; a key match auto-expands it.
+	m = applyMsg(t, m, tea.KeyMsg{Type: tea.KeyLeft})
+	m = applyMsg(t, m, keyRunes("/"))
+	m = typeString(t, m, "alpha")
+	m = applyMsg(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !strings.Contains(m.View(), "src/a.go") {
+		t.Fatalf("precondition: key match should auto-expand alpha")
+	}
+
+	// A collapse during the filter session must still take effect.
+	m = applyMsg(t, m, tea.KeyMsg{Type: tea.KeyLeft})
+	view := m.View()
+	if !strings.Contains(view, "▶ alpha") || strings.Contains(view, "src/a.go") {
+		t.Fatalf("View() = %q, want alpha re-collapsed during filter", view)
+	}
+
+	// And it can be expanded again.
+	m = applyMsg(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	if !strings.Contains(m.View(), "src/a.go") {
+		t.Fatalf("View() = %q, want alpha expanded again during filter", m.View())
+	}
+
+	// Esc still restores the pre-filter collapsed state.
+	m = applyMsg(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if !strings.Contains(m.View(), "▶ alpha") {
+		t.Fatalf("View() = %q, want pre-filter collapsed state after Esc", m.View())
+	}
+}
+
 func TestClearFilterRestoresExpansionState(t *testing.T) {
 	m := newLoadedModel(t, testSnapshot())
 

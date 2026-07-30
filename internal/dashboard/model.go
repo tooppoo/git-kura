@@ -65,8 +65,13 @@ type Model struct {
 	// savedCollapsed snapshots collapsed when a filter session starts and is
 	// restored when the filter is cleared. nil means no filter session.
 	savedCollapsed map[string]bool
-	filter         string
-	filtering      bool
+	// filterCollapsed holds collapse toggles made during the filter session
+	// for auto-expanded groups. It starts empty so a matched group is
+	// expanded regardless of its pre-filter state, while a collapse the user
+	// performs during the session still takes effect.
+	filterCollapsed map[string]bool
+	filter          string
+	filtering       bool
 
 	width  int
 	height int
@@ -152,6 +157,7 @@ func (m Model) updateNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		if m.savedCollapsed == nil {
 			m.savedCollapsed = copyBoolMap(m.collapsed)
+			m.filterCollapsed = make(map[string]bool)
 		}
 		m.filtering = true
 		return m, nil
@@ -213,6 +219,7 @@ func (m Model) clearFilter() Model {
 		m.collapsed = m.savedCollapsed
 		m.savedCollapsed = nil
 	}
+	m.filterCollapsed = nil
 	m.clampCursor()
 	return m
 }
@@ -232,9 +239,7 @@ func copyBoolMap(src map[string]bool) map[string]bool {
 // user's collapse state applies.
 func (m Model) expandedForDisplay(g VisibleGroup) bool {
 	if m.filter != "" && g.AutoExpand {
-		collapsedBeforeFilter := m.savedCollapsed != nil && m.savedCollapsed[g.Key]
-		collapsedDuringFilter := m.collapsed[g.Key] && !collapsedBeforeFilter
-		return !collapsedDuringFilter
+		return !m.filterCollapsed[g.Key]
 	}
 	return !m.collapsed[g.Key]
 }
@@ -344,6 +349,9 @@ func (m *Model) collapseSelected() {
 		return
 	}
 	m.collapsed[r.key] = true
+	if m.savedCollapsed != nil {
+		m.filterCollapsed[r.key] = true
+	}
 	if r.kind == rowPath {
 		for i, cand := range m.rows() {
 			if cand.kind == rowGroup && cand.key == r.key {
@@ -365,6 +373,7 @@ func (m *Model) expandSelected() {
 		return
 	}
 	delete(m.collapsed, r.key)
+	delete(m.filterCollapsed, r.key)
 }
 
 // View renders the whole screen as a string. It never touches the terminal.
