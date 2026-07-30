@@ -10,8 +10,9 @@ type VisibleGroup struct {
 	// VisiblePaths holds the paths to display: all claimed paths when the key
 	// matched (or no filter is active), otherwise only the matched paths.
 	VisiblePaths []string
-	// AutoExpand is set when a path matched the filter, so the group is
-	// expanded while the filter is active regardless of its saved state.
+	// AutoExpand is set when the key or a path matched the filter, so the
+	// group is expanded while the filter is active regardless of its saved
+	// state and every visible path is actually shown.
 	AutoExpand bool
 }
 
@@ -20,8 +21,10 @@ type VisibleGroup struct {
 //
 //   - An empty query keeps every group with all of its paths.
 //   - A key match keeps the group with all of its paths.
-//   - A path match keeps the group with only the matched paths and marks it
-//     for auto-expansion.
+//   - A path match keeps the group with only the matched paths.
+//   - Both kinds of match mark the group for auto-expansion while the filter
+//     is active, so the promised paths are visible even if the group was
+//     collapsed before the filter.
 //   - A group with no key match and no path match is dropped.
 func ApplyFilter(groups []Group, query string) []VisibleGroup {
 	if query == "" {
@@ -36,7 +39,7 @@ func ApplyFilter(groups []Group, query string) []VisibleGroup {
 	var visible []VisibleGroup
 	for _, g := range groups {
 		if strings.Contains(strings.ToLower(g.Key), q) {
-			visible = append(visible, VisibleGroup{Group: g, VisiblePaths: g.Paths})
+			visible = append(visible, VisibleGroup{Group: g, VisiblePaths: g.Paths, AutoExpand: true})
 			continue
 		}
 		var matched []string

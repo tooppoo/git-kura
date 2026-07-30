@@ -146,10 +146,12 @@ Keys:
 | `↑` / `↓` | Select the previous / next row |
 | `←` / `→` | Collapse / expand the selected key group |
 | `/` | Filter keys and claimed paths |
+| `Enter` | Keep the typed filter and leave filter input |
+| `Esc` | Clear the filter |
 | `r` | Reload now |
 | `q`, `Ctrl-C` | Quit |
 
-The filter is a case-insensitive substring match over keys and claimed paths. A key match shows that key's group with all of its claimed paths. A path match shows the owner key with only the matched paths and auto-expands that group while the filter is active. Clearing the filter restores the expand and collapse state from before the filter was applied.
+The filter is a case-insensitive substring match over keys and claimed paths. A key match shows that key's group with all of its claimed paths. A path match shows the owner key with only the matched paths. Matched groups are auto-expanded while the filter is active, so the matching paths are visible even if the group was collapsed. Clearing the filter restores the expand and collapse state from before the filter was applied.
 
 The seal state is reloaded periodically and on `r`. When a reload fails after a successful load, the previous snapshot stays visible and is marked stale together with the last successful load time. When the initial load fails, the error is shown inside the TUI and `r` retries. Store integrity violations (schema validation failures, invalid or non-normalized stored paths, `duplicate-canonical-path` entries) are listed separately and are never rendered as normal claims.
 

@@ -1,4 +1,3 @@
-
 # Use bubbletea as the TUI runtime dependency for the dashboard
 
 - Status: Accepted

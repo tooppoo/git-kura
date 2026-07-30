@@ -123,6 +123,35 @@ func TestBuildSnapshotViolationsExcludedFromClaims(t *testing.T) {
 	}
 }
 
+func TestBuildSnapshotDuplicateCanonicalExcludesBothEntries(t *testing.T) {
+	// InspectPathStore attaches the duplicate-canonical-path finding only to
+	// the second raw entry in sorted order; the clean first entry ("b.txt")
+	// carries no finding but its ownership is contested, so it must not be
+	// listed as a normal claim either.
+	dup := "x/../b.txt"
+	snap := BuildSnapshot(
+		[]string{"a-key"},
+		[]seal.LsClaim{
+			{Key: "a-key", Path: "b.txt"},
+			{Key: "b-key", Path: dup},
+			{Key: "a-key", Path: "ok.txt"},
+		},
+		[]seal.DoctorFinding{
+			{Severity: "error", Code: "duplicate-canonical-path", Path: strPtr(dup), Message: "duplicate"},
+		},
+	)
+
+	if len(snap.Groups) != 1 || snap.Groups[0].Key != "a-key" {
+		t.Fatalf("groups = %+v, want only open key a-key", snap.Groups)
+	}
+	if !reflect.DeepEqual(snap.Groups[0].Paths, []string{"ok.txt"}) {
+		t.Fatalf("paths = %v, want contested b.txt excluded", snap.Groups[0].Paths)
+	}
+	if snap.ClaimedPaths != 1 {
+		t.Fatalf("ClaimedPaths = %d, want 1", snap.ClaimedPaths)
+	}
+}
+
 func TestBuildSnapshotViolationsAreSorted(t *testing.T) {
 	snap := BuildSnapshot(nil, nil, []seal.DoctorFinding{
 		{Severity: "error", Code: "invalid-stored-path", Path: strPtr("z.txt"), Message: "bad"},
@@ -229,6 +258,30 @@ func TestCollectReportsIntegrityViolations(t *testing.T) {
 	}
 	if !reflect.DeepEqual(snap.Groups[0].Paths, []string{"ok.txt"}) {
 		t.Fatalf("paths = %v, want only ok.txt", snap.Groups[0].Paths)
+	}
+}
+
+func TestCollectExcludesContestedDuplicateFirstEntry(t *testing.T) {
+	repo := initGitRepo(t)
+	// "b.txt" sorts before "x/../b.txt", so the clean entry gets no finding
+	// from InspectPathStore; the dashboard must still not show it as a
+	// normal claim because its canonical path is contested.
+	writeState(t, repo, nil,
+		`{"schemaVersion":1,"paths":{"b.txt":{"key":"a-key"},"x/../b.txt":{"key":"b-key"},"ok.txt":{"key":"a-key"}}}`)
+
+	snap, err := Collect(repo)
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	if len(snap.Groups) != 1 || snap.Groups[0].Key != "a-key" {
+		t.Fatalf("groups = %+v, want only a-key", snap.Groups)
+	}
+	if !reflect.DeepEqual(snap.Groups[0].Paths, []string{"ok.txt"}) {
+		t.Fatalf("paths = %v, want contested b.txt excluded", snap.Groups[0].Paths)
+	}
+	if len(snap.Violations) != 1 || snap.Violations[0].Code != "duplicate-canonical-path" {
+		t.Fatalf("violations = %+v, want one duplicate-canonical-path", snap.Violations)
 	}
 }
 

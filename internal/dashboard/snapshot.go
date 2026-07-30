@@ -53,11 +53,22 @@ type Snapshot struct {
 func BuildSnapshot(openKeys []string, claims []seal.LsClaim, findings []seal.DoctorFinding) Snapshot {
 	violations := make([]Violation, 0, len(findings))
 	violatedPaths := make(map[string]bool, len(findings))
+	// contestedCanonical collects the canonical paths behind
+	// duplicate-canonical-path findings. The finding is attached only to the
+	// second and later raw entries of a duplicate pair, so the first entry
+	// must be excluded via its canonical form or it would render as a normal,
+	// uncontested claim.
+	contestedCanonical := make(map[string]bool)
 	for _, f := range findings {
 		v := Violation{Code: f.Code, Message: f.Message}
 		if f.Path != nil {
 			v.Path = *f.Path
 			violatedPaths[*f.Path] = true
+			if f.Code == "duplicate-canonical-path" {
+				if canonical, err := seal.CanonicalStoredPath(*f.Path); err == nil {
+					contestedCanonical[canonical] = true
+				}
+			}
 		}
 		violations = append(violations, v)
 	}
@@ -78,6 +89,11 @@ func BuildSnapshot(openKeys []string, claims []seal.LsClaim, findings []seal.Doc
 	for _, c := range claims {
 		if violatedPaths[c.Path] {
 			continue
+		}
+		if len(contestedCanonical) > 0 {
+			if canonical, err := seal.CanonicalStoredPath(c.Path); err == nil && contestedCanonical[canonical] {
+				continue
+			}
 		}
 		pathsByKey[c.Key] = append(pathsByKey[c.Key], c.Path)
 		claimedPaths++
@@ -113,20 +129,48 @@ func BuildSnapshot(openKeys []string, claims []seal.LsClaim, findings []seal.Doc
 	}
 }
 
+// Sources holds the resolved filesystem locations one snapshot read needs.
+// Resolving them once up front keeps periodic reloads free of git
+// subprocess invocations.
+type Sources struct {
+	// MetaDir is <git-common-dir>/kura/meta/worktrees.
+	MetaDir string
+	// StoreFile is the seal store at <git-common-dir>/kura/seals/paths.json.
+	StoreFile string
+}
+
+// ResolveSources resolves the state locations for repoRoot.
+func ResolveSources(repoRoot string) (Sources, error) {
+	dir, err := worktree.StateDir(repoRoot)
+	if err != nil {
+		return Sources{}, fmt.Errorf("resolve state dir: %w", err)
+	}
+	storeFile, _, err := seal.StorePaths(repoRoot)
+	if err != nil {
+		return Sources{}, fmt.Errorf("resolve seal store path: %w", err)
+	}
+	return Sources{MetaDir: filepath.Join(dir, "meta", "worktrees"), StoreFile: storeFile}, nil
+}
+
 // Collect reads the open managed worktree keys and the seal store for
 // repoRoot and aggregates them into a Snapshot. It is read-only and never
 // acquires the seal store writer lock (paths.lock).
 func Collect(repoRoot string) (Snapshot, error) {
-	openKeys, err := openWorktreeKeys(repoRoot)
+	src, err := ResolveSources(repoRoot)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return CollectFrom(src)
+}
+
+// CollectFrom is Collect for already-resolved state locations.
+func CollectFrom(src Sources) (Snapshot, error) {
+	openKeys, err := openWorktreeKeys(src.MetaDir)
 	if err != nil {
 		return Snapshot{}, err
 	}
 
-	storeFile, _, err := seal.StorePaths(repoRoot)
-	if err != nil {
-		return Snapshot{}, fmt.Errorf("resolve seal store path: %w", err)
-	}
-	store, err := seal.ReadStore(storeFile)
+	store, err := seal.ReadStore(src.StoreFile)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -142,14 +186,9 @@ func Collect(repoRoot string) (Snapshot, error) {
 }
 
 // openWorktreeKeys enumerates open managed worktree keys the same way
-// "git kura ls" does: one key per metadata file under
-// <git-common-dir>/kura/meta/worktrees.
-func openWorktreeKeys(repoRoot string) ([]string, error) {
-	dir, err := worktree.StateDir(repoRoot)
-	if err != nil {
-		return nil, fmt.Errorf("resolve state dir: %w", err)
-	}
-	entries, err := os.ReadDir(filepath.Join(dir, "meta", "worktrees"))
+// "git kura ls" does: one key per metadata file under metaDir.
+func openWorktreeKeys(metaDir string) ([]string, error) {
+	entries, err := os.ReadDir(metaDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

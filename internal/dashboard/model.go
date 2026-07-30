@@ -225,12 +225,16 @@ func copyBoolMap(src map[string]bool) map[string]bool {
 	return dst
 }
 
-// expandedForDisplay reports whether the group's paths are shown. A group
-// whose path matched the active filter is auto-expanded for the duration of
-// the filter; otherwise the user's collapse state applies.
+// expandedForDisplay reports whether the group's paths are shown. A matched
+// group is auto-expanded while the filter is active so its matching paths
+// are visible even when it was collapsed before the filter; a collapse the
+// user performs during the filter session still wins. Without a filter the
+// user's collapse state applies.
 func (m Model) expandedForDisplay(g VisibleGroup) bool {
 	if m.filter != "" && g.AutoExpand {
-		return true
+		collapsedBeforeFilter := m.savedCollapsed != nil && m.savedCollapsed[g.Key]
+		collapsedDuringFilter := m.collapsed[g.Key] && !collapsedBeforeFilter
+		return !collapsedDuringFilter
 	}
 	return !m.collapsed[g.Key]
 }
@@ -413,7 +417,7 @@ func (m Model) View() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString("↑↓ select   ←→ collapse/expand   / filter   r refresh   q quit\n")
+	b.WriteString("↑↓ select   ←→ collapse/expand   / filter   esc clear filter   r refresh   q quit\n")
 	return m.clipToWidth(b.String())
 }
 

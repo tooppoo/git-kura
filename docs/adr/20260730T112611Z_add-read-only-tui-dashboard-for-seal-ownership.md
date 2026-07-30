@@ -1,4 +1,3 @@
-
 # Adopt a key-based read-only TUI dashboard for seal ownership
 
 - Status: Accepted
@@ -28,7 +27,7 @@ This decision affects public CLI behavior and project scope, so it is recorded a
 - Detailed worktree metadata such as worktree path, branch, commit, or dirty state must not appear in the initial version.
 - The dashboard must prioritize a single overview of all keys over per-worktree detail screens.
 - The dashboard must provide scrolling, per-key expand and collapse, and a filter.
-- The filter must be a case-insensitive substring match over keys and claimed paths. A key match shows the whole group with all claimed paths. A path match shows the owner key with only the matched paths and auto-expands that group while the filter is active. Clearing the filter must restore the expand and collapse state from before the filter was applied.
+- The filter must be a case-insensitive substring match over keys and claimed paths. A key match shows the whole group with all claimed paths. A path match shows the owner key with only the matched paths. Matched groups must be auto-expanded while the filter is active, so the promised paths are visible even when the group was collapsed before the filter. Clearing the filter must restore the expand and collapse state from before the filter was applied.
 - The initial version must be read-only: no `seal claim`, `seal unclaim`, merge, close, or branch operations from the dashboard.
 - Snapshot reads and periodic polling must never acquire the seal store writer lock (`paths.lock`), so the dashboard never delays `seal claim`, `seal unclaim`, or `close`.
 - A failed initial load must be shown inside the TUI with a manual retry. A failed reload after a prior success must keep the previous snapshot, mark it stale, and show the last successful load time.

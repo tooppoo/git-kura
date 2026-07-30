@@ -24,6 +24,8 @@ Keys:
   up/down     Select the previous / next row
   left/right  Collapse / expand the selected key group
   /           Filter keys and claimed paths (case-insensitive substring)
+  Enter       Keep the typed filter and leave filter input
+  Esc         Clear the filter and restore the pre-filter expansion state
   r           Reload now
   q, Ctrl-C   Quit`
 
@@ -69,7 +71,11 @@ func (r *runner) cmdDashboard() error {
 	if err != nil {
 		return fmt.Errorf("not inside a git repository")
 	}
-	loader := func() (dashboard.Snapshot, error) { return dashboard.Collect(repoRoot) }
+	src, err := dashboard.ResolveSources(repoRoot)
+	if err != nil {
+		return err
+	}
+	loader := func() (dashboard.Snapshot, error) { return dashboard.CollectFrom(src) }
 
 	run := r.dashboardRun
 	if run == nil {

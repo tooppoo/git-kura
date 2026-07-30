@@ -135,6 +135,19 @@ func TestTickTriggersReloadAndNextTick(t *testing.T) {
 	if cmd == nil {
 		t.Fatalf("tick returned nil cmd, want reload + next tick batch")
 	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("tick cmd returned %T, want tea.BatchMsg", cmd())
+	}
+	if len(batch) != 2 {
+		t.Fatalf("len(batch) = %d, want 2 (reload + next tick)", len(batch))
+	}
+	// The first batched command is the reload; the second is the next tick,
+	// which is not executed here because it sleeps for the poll interval.
+	msg := batch[0]()
+	if _, ok := msg.(loadedMsg); !ok {
+		t.Fatalf("batch[0] returned %T, want loadedMsg", msg)
+	}
 }
 
 func TestQuitKeys(t *testing.T) {
@@ -253,6 +266,27 @@ func TestFilterAutoExpandsPathMatchedGroup(t *testing.T) {
 	view := m.View()
 	if !strings.Contains(view, "src/a.go") {
 		t.Fatalf("View() = %q, want collapsed group auto-expanded on path match", view)
+	}
+}
+
+func TestFilterAutoExpandsKeyMatchedCollapsedGroup(t *testing.T) {
+	m := newLoadedModel(t, testSnapshot())
+
+	// Collapse alpha, then filter by its key: the full claim list must be
+	// visible without a manual expand.
+	m = applyMsg(t, m, tea.KeyMsg{Type: tea.KeyLeft})
+	m = applyMsg(t, m, keyRunes("/"))
+	m = typeString(t, m, "alpha")
+
+	view := m.View()
+	if !strings.Contains(view, "src/a.go") || !strings.Contains(view, "src/b.go") {
+		t.Fatalf("View() = %q, want collapsed group auto-expanded on key match", view)
+	}
+
+	// Esc restores the pre-filter collapsed state.
+	m = applyMsg(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if !strings.Contains(m.View(), "▶ alpha") {
+		t.Fatalf("View() = %q, want alpha collapsed again after filter cleared", m.View())
 	}
 }
 

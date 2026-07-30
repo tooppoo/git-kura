@@ -46,8 +46,8 @@ func TestApplyFilterKeyMatchKeepsAllPaths(t *testing.T) {
 	if !reflect.DeepEqual(v.VisiblePaths, []string{"crates/cli/src/dashboard.rs", "crates/cli/src/main.rs"}) {
 		t.Fatalf("VisiblePaths = %v, want all claimed paths", v.VisiblePaths)
 	}
-	if v.AutoExpand {
-		t.Fatalf("AutoExpand = true, want false for key match")
+	if !v.AutoExpand {
+		t.Fatalf("AutoExpand = false, want true for key match")
 	}
 }
 
