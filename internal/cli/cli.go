@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/tooppoo/git-kura/internal/dashboard"
 	"github.com/tooppoo/git-kura/internal/output"
 )
 
@@ -54,6 +55,11 @@ type runner struct {
 	stdout  io.Writer
 	stderr  io.Writer
 	version string
+
+	// dashboardInteractive and dashboardRun are seams for dashboard tests;
+	// nil selects the real terminal-backed implementations in cmdDashboard.
+	dashboardInteractive func() bool
+	dashboardRun         func(loader func() (dashboard.Snapshot, error)) error
 }
 
 // exitError carries a specific exit code to be used by Run.

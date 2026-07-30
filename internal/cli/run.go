@@ -52,6 +52,7 @@ Commands:
   open  <key> [flags]  Create a worktree for <key>
   close <key>          Remove the worktree for <key>
   ls                   List all open worktrees
+  dashboard            Open a read-only TUI overview of seal ownership
   seal  <subcommand>   Manage path claims in the repository-wide seal store
   tools <subcommand>   Install, remove, and inspect auxiliary tool components
 
@@ -163,6 +164,7 @@ func (r *runner) buildRootCmd() *cobra.Command {
 		r.buildOpenCmd(),
 		r.buildCloseCmd(),
 		r.buildLsCmd(),
+		r.buildDashboardCmd(),
 		r.buildSealCmd(),
 		r.buildToolsCmd(),
 		// Pre-register hidden stubs for cobra's shell-completion endpoints so
