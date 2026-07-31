@@ -19,47 +19,9 @@ jobs:
       - name: Run installer unit tests
         run: sh scripts/test/test-installer.sh
 
-  smoke-with-version:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    name: Smoke test with version (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install git-kura
-        run: |
-          sh install.sh --version v0.1.5 --install-dir "$HOME/.local/bin"
-
-      - name: Verify binary is in install dir
-        run: test -x "$HOME/.local/bin/git-kura"
-
-      - name: Verify git-kura responds to -h
-        run: |
-          "$HOME/.local/bin/git-kura" -h
-
-      - name: Install to custom dir
-        run: |
-          sh install.sh --version v0.1.5 --install-dir /tmp/kura-custom-bin
-          test -x /tmp/kura-custom-bin/git-kura
-
-  smoke-latest:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    name: Smoke test latest release(${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install git-kura
-        run: |
-          sh install.sh
-
-      - name: Verify binary is in install dir
-        run: test -x "$HOME/.local/bin/git-kura"
-
-      - name: Verify git-kura responds to -h
-        run: |
-          "$HOME/.local/bin/git-kura" -h
+  smoke-test:
+    # The install target matrix, install modes, and post-install checks are declared in
+    # .github/workflows/artifacts.manifest.json so the reusable workflow stays generic.
+    uses: tooppoo/github-release-workflows/.github/workflows/wf-installer-smoke-test.yml@main
+    with:
+      config_path: .github/workflows/artifacts.manifest.json
