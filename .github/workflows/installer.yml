@@ -22,7 +22,7 @@ jobs:
   install-dir-creation:
     # The reusable smoke test always creates the install dir before calling install.sh,
     # so it never exercises install.sh's own mkdir path. Guard it here instead.
-    name: Install into a directory that does not exist
+    name: Install dir creation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -33,11 +33,17 @@ jobs:
           test ! -d "$target"
           sh install.sh --install-dir "$target"
           test -x "$target/git-kura"
+          "$target/git-kura" --version
 
-      - name: Install into the default directory
+      # A fresh HOME covers the default-install-dir case without deleting the
+      # runner image's own $HOME/.local/bin, which holds unrelated tooling.
+      - name: Install into the default directory under a fresh HOME
         run: |
+          export HOME="$RUNNER_TEMP/fakehome"
+          test ! -d "$HOME/.local/bin"
           sh install.sh
           test -x "$HOME/.local/bin/git-kura"
+          "$HOME/.local/bin/git-kura" --version
 
   smoke-test:
     # The install target matrix, install modes, and post-install checks are declared in
