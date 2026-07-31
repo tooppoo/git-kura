@@ -19,9 +19,30 @@ jobs:
       - name: Run installer unit tests
         run: sh scripts/test/test-installer.sh
 
+  install-dir-creation:
+    # The reusable smoke test always creates the install dir before calling install.sh,
+    # so it never exercises install.sh's own mkdir path. Guard it here instead.
+    name: Install into a directory that does not exist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install into a missing nested directory
+        run: |
+          target="$RUNNER_TEMP/missing/nested/bin"
+          test ! -d "$target"
+          sh install.sh --install-dir "$target"
+          test -x "$target/git-kura"
+
+      - name: Install into the default directory
+        run: |
+          sh install.sh
+          test -x "$HOME/.local/bin/git-kura"
+
   smoke-test:
     # The install target matrix, install modes, and post-install checks are declared in
     # .github/workflows/artifacts.manifest.json so the reusable workflow stays generic.
-    uses: tooppoo/github-release-workflows/.github/workflows/wf-installer-smoke-test.yml@main
+    # Pinned to a commit: the upstream repo has no tag containing this workflow yet.
+    uses: tooppoo/github-release-workflows/.github/workflows/wf-installer-smoke-test.yml@80a79558604015f7c7638f8da64495dd9a2317be
     with:
       config_path: .github/workflows/artifacts.manifest.json
