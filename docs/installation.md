@@ -54,7 +54,15 @@ This removes only the `git-kura` executable installed by the curl installer. Rep
 
 The installer always verifies the SHA-256 checksum of the downloaded archive against `checksums.txt` from the same release. A mismatch causes the installer to abort before touching `~/.local/bin`.
 
-If `cosign` is on your `PATH`, the installer additionally verifies the `checksums.txt` signature bundle (`checksums.txt.sigstore.json`) published with each release. You can make this check mandatory with `--require-signature`.
+The installer does not verify the release signature. Each release also publishes `checksums.txt.sigstore.json`, a Sigstore keyless signature bundle for `checksums.txt`, which you can verify yourself with `cosign` after downloading both files from the same release:
+
+```sh
+cosign verify-blob \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github\.com/tooppoo/git-kura/\.github/workflows/release\.yml@refs/tags/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+```
 
 ## Manual archive install
 

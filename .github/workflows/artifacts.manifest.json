@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "targets": [
+    {
+      "id": "linux-x86_64",
+      "runner": "ubuntu-24.04",
+      "os": "Linux",
+      "arch": "x86_64"
+    },
+    {
+      "id": "linux-arm64",
+      "runner": "ubuntu-24.04-arm",
+      "os": "Linux",
+      "arch": "arm64"
+    },
+    {
+      "id": "darwin-x86_64",
+      "runner": "macos-15-intel",
+      "os": "Darwin",
+      "arch": "x86_64"
+    },
+    {
+      "id": "darwin-arm64",
+      "runner": "macos-15",
+      "os": "Darwin",
+      "arch": "arm64"
+    }
+  ],
+  "installer_smoke_test": {
+    "installer_script": "install.sh",
+    "command": "git-kura",
+    "target_ids": [
+      "linux-x86_64",
+      "linux-arm64",
+      "darwin-x86_64",
+      "darwin-arm64"
+    ],
+    "install_modes": [
+      "latest",
+      "pinned-latest-release"
+    ],
+    "checks": [
+      {
+        "id": "help",
+        "args": [
+          "-h"
+        ]
+      },
+      {
+        "id": "version",
+        "args": [
+          "--version"
+        ]
+      }
+    ]
+  }
+}

@@ -19,47 +19,36 @@ jobs:
       - name: Run installer unit tests
         run: sh scripts/test/test-installer.sh
 
-  smoke-with-version:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    name: Smoke test with version (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+  install-dir-creation:
+    # The reusable smoke test always creates the install dir before calling install.sh,
+    # so it never exercises install.sh's own mkdir path. Guard it here instead.
+    name: Install dir creation
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install git-kura
+      - name: Install into a missing nested directory
         run: |
-          sh install.sh --version v0.1.5 --install-dir "$HOME/.local/bin"
+          target="$RUNNER_TEMP/missing/nested/bin"
+          test ! -d "$target"
+          sh install.sh --install-dir "$target"
+          test -x "$target/git-kura"
+          "$target/git-kura" --version
 
-      - name: Verify binary is in install dir
-        run: test -x "$HOME/.local/bin/git-kura"
-
-      - name: Verify git-kura responds to -h
+      # A fresh HOME covers the default-install-dir case without deleting the
+      # runner image's own $HOME/.local/bin, which holds unrelated tooling.
+      - name: Install into the default directory under a fresh HOME
         run: |
-          "$HOME/.local/bin/git-kura" -h
-
-      - name: Install to custom dir
-        run: |
-          sh install.sh --version v0.1.5 --install-dir /tmp/kura-custom-bin
-          test -x /tmp/kura-custom-bin/git-kura
-
-  smoke-latest:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    name: Smoke test latest release(${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install git-kura
-        run: |
+          export HOME="$RUNNER_TEMP/fakehome"
+          test ! -d "$HOME/.local/bin"
           sh install.sh
+          test -x "$HOME/.local/bin/git-kura"
+          "$HOME/.local/bin/git-kura" --version
 
-      - name: Verify binary is in install dir
-        run: test -x "$HOME/.local/bin/git-kura"
-
-      - name: Verify git-kura responds to -h
-        run: |
-          "$HOME/.local/bin/git-kura" -h
+  smoke-test:
+    # The install target matrix, install modes, and post-install checks are declared in
+    # .github/workflows/artifacts.manifest.json so the reusable workflow stays generic.
+    # Pinned to a commit: the upstream repo has no tag containing this workflow yet.
+    uses: tooppoo/github-release-workflows/.github/workflows/wf-installer-smoke-test.yml@80a79558604015f7c7638f8da64495dd9a2317be
+    with:
+      config_path: .github/workflows/artifacts.manifest.json

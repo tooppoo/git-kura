@@ -59,3 +59,19 @@ sboms:
   - id: git-kura
     artifacts: archive
     cmd: syft
+
+# Keyless cosign signature over checksums.txt, which in turn covers every platform archive.
+# The release-asset validate step requires checksums.txt.sigstore.json, so this block must
+# stay in sync with scripts/release/internal/step/releaseasset/handler.go.
+# Snapshot builds pass --skip=sign because keyless signing needs an OIDC token.
+signs:
+  - id: checksums
+    cmd: cosign
+    artifacts: checksum
+    signature: '${artifact}.sigstore.json'
+    args:
+      - sign-blob
+      - '--yes'
+      - '--bundle=${signature}'
+      - '${artifact}'
+    output: true
