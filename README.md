@@ -43,7 +43,7 @@ Install the latest release:
 brew install tooppoo/tap-catalog/git-kura
 ```
 
-This installs `git-kura` into `~/.local/bin`. See [docs/installation.md](docs/installation.md) for version pinning, custom install directories, checksum verification, and other installation methods such as Homebrew on macOS and Scoop on Windows.
+See [docs/installation.md](docs/installation.md) other installation methods such as curl on Linux/macOS and Scoop on Windows.
 
 It is recommended to install repository-local safety helpers:
 
