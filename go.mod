@@ -1,6 +1,6 @@
 module github.com/tooppoo/git-kura
 
-go 1.26.5
+go 1.26.6
 
 tool (
 	github.com/google/go-licenses/v2

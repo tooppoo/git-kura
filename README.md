@@ -93,6 +93,8 @@ git kura close issue-54
 
 `git kura close <key>` removes the managed worktree and branch and releases every path seal held by that key.
 
+To copy local ignored files such as `.env` into new worktrees, add a `.worktreeinclude` file at the source worktree root. It uses `.gitignore` patterns and only selects Git-ignored files; existing destination files are preserved. See [copying local ignored files](docs/commands.md#copying-local-ignored-files-with-worktreeinclude) for examples and failure behavior.
+
 ## Core commands
 
 ```sh
