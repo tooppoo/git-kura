@@ -646,6 +646,14 @@ func (r *runner) cmdOpen(key string, opts openOptions) error {
 	}
 	createdMetadata := true
 
+	if err := worktree.ApplyInclude(repoRoot, path); err != nil {
+		return r.openFail(opts, fmt.Errorf("apply .worktreeinclude: %w; worktree retained at %s (branch and metadata retained); inspect and copy remaining files manually", err, path))
+	}
+	dirty, err := gitutil.WorktreeDirty(path)
+	if err != nil {
+		return r.openFail(opts, fmt.Errorf("check worktree status at %s: %w", path, err))
+	}
+
 	data := openDataJSON{
 		SchemaVersion:   1,
 		Key:             key,
@@ -655,7 +663,7 @@ func (r *runner) cmdOpen(key string, opts openOptions) error {
 		RepositoryRoot:  repoRoot,
 		BaseBranch:      base,
 		Exists:          true,
-		Dirty:           false,
+		Dirty:           dirty,
 		CreatedWorktree: &createdWorktree,
 		CreatedBranch:   &createdBranch,
 		CreatedMetadata: &createdMetadata,

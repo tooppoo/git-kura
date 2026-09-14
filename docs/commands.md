@@ -51,6 +51,33 @@ If the corresponding branch or worktree already exists, Kura should not create a
 
 A dry run also checks, without side effects, conditions that would collide at real creation time: an existing worktree path, branch, or metadata. Such a conflict does not fail the command; the dry run still succeeds with exit code `0` and reports each conflict as a warning (`open-dry-run-conflict`). In JSON mode the warnings appear in `warnings[]` with the colliding items under `details.conflicts`.
 
+### Copying local ignored files with `.worktreeinclude`
+
+After creating the worktree, branch, and metadata, `open` reads `.worktreeinclude` at the root of the worktree where you invoked the command. This is also the source of the copied files, including when you run from a subdirectory or a linked worktree. The local manifest can be tracked, untracked, or modified. An absent manifest, an empty manifest, and patterns with no matching files are all no-ops.
+
+For example, with `.env`, `.env.local`, and `config/local/` ignored by Git, use:
+
+```gitignore
+# .worktreeinclude
+.env
+.env.local
+config/local/**
+!config/local/**/
+!config/local/**/*.log
+```
+
+Running `git kura open issue-123` copies the matching ignored files into the same relative paths in the new worktree. Patterns use Git's `.gitignore` syntax: comments, blank lines, `*`, `?`, `**`, character classes, directory patterns, root anchoring with `/`, and `!` negation. A bare `.env` matches at any depth; `/.env` matches only at the root. Git's excluded-parent rule also applies: selecting a whole parent directory prevents later child negations from taking effect. In the example, `config/local/**` selects the contents and `!config/local/**/` lets Git evaluate descendant files individually, so the final line can omit logs at any depth.
+
+Only files that match the manifest and are untracked and ignored in the source worktree are eligible. Git's normal ignore sources apply, including nested `.gitignore` files, `.git/info/exclude`, and `core.excludesFile`. Tracked files, including local modifications and staged files, and untracked files that are not ignored are never copied. Directory patterns copy eligible regular files recursively and create their parent directories; empty directories and submodule contents are not copied.
+
+Existing destination files, directories in place of files, and symlinks are skipped without overwriting or deleting them. Existing real directories can receive missing children. Source symlinks and other non-regular files are skipped, and destination parent symlinks are not followed. `.git` paths and paths outside the worktree are not copied. The manifest itself must be a regular file. New files use the source permission bits subject to the process umask.
+
+If reading the manifest, selecting files, or copying fails, `open` exits with code `1` and identifies the retained worktree in the error. The worktree, branch, metadata, and files already copied remain available. Inspect them and copy any remaining files manually; rerunning `open` with the same key still encounters the existing branch/worktree. No rollback or file deletion occurs.
+
+Successful copying adds no output fields. The `dirty` field in structured output reflects the new worktree's actual Git status; copied files may appear as untracked if the source's ignore rules were not committed. `--dry-run` does not read or apply `.worktreeinclude`, or preview or validate its copy selection.
+
+This follows an existing tool convention, not a Git built-in feature. Kura does not execute bootstrap scripts or lifecycle hooks from this file. See the [architecture decision](adr/20260908T000817Z_copy-ignored-files-with-worktreeinclude.md) for compatibility and safety choices.
+
 ## `git kura get <key>`
 
 Resolve the branch or worktree associated with the given key.
